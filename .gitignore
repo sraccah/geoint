@@ -74,6 +74,7 @@ tests/coverage/
 
 # IDE
 .vscode/
+.kiro/
 .idea/
 *.swp
 *.swo
