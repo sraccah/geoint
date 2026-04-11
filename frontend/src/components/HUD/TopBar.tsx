@@ -11,7 +11,7 @@ import { SearchBar } from './SearchBar';
 export function TopBar() {
     const { isConnected, stats } = useFlightStore();
     const { toggleLeftPanel, toggleRightPanel, leftPanelOpen } = useUIStore();
-    const { visibleGroups, satellites } = useSatelliteStore();
+    const { visibleGroups, satellites, groups } = useSatelliteStore();
     const [time, setTime] = useState('');
 
     useEffect(() => {
@@ -20,12 +20,6 @@ export function TopBar() {
         const interval = setInterval(update, 1000);
         return () => clearInterval(interval);
     }, []);
-
-    // Count visible satellites
-    const visibleSatCount = [...visibleGroups].reduce(
-        (sum, gid) => sum + (satellites.get(gid)?.length ?? 0), 0
-    );
-    const militarySatCount = satellites.get('military')?.length ?? 0;
 
     return (
         <div className="hud-panel border-b border-hud-border flex items-center gap-3 px-3 py-2 z-20 shrink-0">
@@ -45,20 +39,46 @@ export function TopBar() {
             </div>
 
             {/* Center: Search + Stats */}
-            <div className="flex items-center gap-4 flex-1 min-w-0">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
                 <SearchBar />
-                <div className="hidden xl:flex items-center gap-3 font-mono text-xs shrink-0">
-                    {/* Flight stats */}
-                    <StatBadge label="AIRBORNE" value={stats?.airborne ?? '—'} color="cyan" />
-                    <StatBadge label="COMMERCIAL" value={stats?.commercial ?? '—'} color="cyan" />
-                    <StatBadge label="CARGO" value={stats?.cargo ?? '—'} color="amber" />
-                    <StatBadge label="MIL ✈" value={stats?.military ?? '—'} color="red" />
-                    <StatBadge label="GROUND" value={stats?.on_ground ?? '—'} color="dim" />
+
+                {/* Flight stats */}
+                <div className="hidden 2xl:flex items-center gap-3 font-mono text-xs shrink-0">
+                    <StatBadge label="AIRBORNE" value={stats?.airborne ?? '—'} color="#00d4ff" />
+                    <StatBadge label="COMM" value={stats?.commercial ?? '—'} color="#00d4ff" />
+                    <StatBadge label="CARGO" value={stats?.cargo ?? '—'} color="#ffaa00" />
+                    <StatBadge label="MIL ✈" value={stats?.military ?? '—'} color="#ff3355" />
+                    <StatBadge label="GROUND" value={stats?.on_ground ?? '—'} color="#4a7a99" />
+
                     {/* Divider */}
-                    <div className="w-px h-6 bg-hud-border mx-1" />
-                    {/* Satellite stats */}
-                    <StatBadge label="SAT VISIBLE" value={visibleSatCount || '—'} color="purple" />
-                    <StatBadge label="MIL 🛰" value={militarySatCount || '—'} color="red" />
+                    <div className="w-px h-5 bg-hud-border" />
+
+                    {/* Satellite stats — one per group */}
+                    {groups.map((g) => {
+                        const count = satellites.get(g.id)?.length ?? 0;
+                        const visible = visibleGroups.has(g.id);
+                        return (
+                            <StatBadge
+                                key={g.id}
+                                label={g.icon + ' ' + g.label.substring(0, 5).toUpperCase()}
+                                value={count || '—'}
+                                color={visible && count > 0 ? g.color : '#4a7a99'}
+                            />
+                        );
+                    })}
+                </div>
+
+                {/* Compact stats for smaller screens */}
+                <div className="hidden xl:flex 2xl:hidden items-center gap-3 font-mono text-xs shrink-0">
+                    <StatBadge label="AIRBORNE" value={stats?.airborne ?? '—'} color="#00d4ff" />
+                    <StatBadge label="MIL ✈" value={stats?.military ?? '—'} color="#ff3355" />
+                    <StatBadge label="CARGO" value={stats?.cargo ?? '—'} color="#ffaa00" />
+                    <div className="w-px h-5 bg-hud-border" />
+                    {groups.filter((g) => ['military', 'stations', 'starlink'].includes(g.id)).map((g) => (
+                        <StatBadge key={g.id} label={g.icon + ' ' + g.label.substring(0, 4).toUpperCase()}
+                            value={satellites.get(g.id)?.length || '—'}
+                            color={visibleGroups.has(g.id) ? g.color : '#4a7a99'} />
+                    ))}
                 </div>
             </div>
 
@@ -80,18 +100,11 @@ export function TopBar() {
     );
 }
 
-function StatBadge({ label, value, color }: {
-    label: string; value: number | string;
-    color: 'cyan' | 'amber' | 'red' | 'green' | 'dim' | 'purple';
-}) {
-    const colorClass = {
-        cyan: 'text-hud-cyan', amber: 'text-hud-amber', red: 'text-hud-red',
-        green: 'text-hud-green', dim: 'text-hud-text-dim', purple: 'text-purple-400',
-    }[color];
+function StatBadge({ label, value, color }: { label: string; value: number | string; color: string }) {
     return (
-        <div className="flex flex-col items-center">
-            <span className={cn('font-bold text-sm', colorClass)}>{value}</span>
-            <span className="text-hud-text-dim text-[9px] tracking-wider">{label}</span>
+        <div className="flex flex-col items-center min-w-0">
+            <span className="font-bold text-sm" style={{ color }}>{value}</span>
+            <span className="text-hud-text-dim text-[9px] tracking-wider truncate max-w-[52px]">{label}</span>
         </div>
     );
 }

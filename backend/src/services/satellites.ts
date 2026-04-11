@@ -16,7 +16,7 @@ import { SatelliteGP, SatelliteGroup } from '../types';
 
 const CELESTRAK_BASE = 'https://celestrak.org/NORAD/elements/gp.php';
 const CELESTRAK_SUPPLEMENTAL = 'https://celestrak.org/NORAD/elements/supplemental/sup-gp.php';
-const CACHE_TTL_SECONDS = 6 * 3600; // 6 hours
+const CACHE_TTL_SECONDS = 2 * 3600; // 2 hours — SGP4 accuracy degrades after ~5h from epoch
 
 export const SATELLITE_GROUPS: SatelliteGroup[] = [
     { id: 'stations', label: 'Space Stations', color: '#00d4ff', icon: '🛸', description: 'ISS, Tiangong, CSS', celestrakGroup: 'stations' },
