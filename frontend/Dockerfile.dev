@@ -1,0 +1,22 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+RUN apk add --no-cache libc6-compat
+
+# Copy package.json first — no lockfile so npm resolves fresh
+COPY package.json ./
+
+# Install with exact versions, no cache
+RUN npm install --no-package-lock
+
+# Verify maplibre-gl v5 is installed
+RUN node -e "const v = require('maplibre-gl/package.json').version; console.log('maplibre-gl:', v); if (!v.startsWith('5')) { console.error('WRONG VERSION'); process.exit(1); }"
+
+COPY . .
+
+EXPOSE 3666
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+CMD ["npm", "run", "dev"]

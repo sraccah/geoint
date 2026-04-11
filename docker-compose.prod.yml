@@ -1,0 +1,81 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgis/postgis:15-3.3
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: always
+    networks:
+      - geoint_net
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    volumes:
+      - redis_data:/data
+    restart: always
+    networks:
+      - geoint_net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+      OPENSKY_USERNAME: ${OPENSKY_USERNAME}
+      OPENSKY_PASSWORD: ${OPENSKY_PASSWORD}
+      CORS_ORIGIN: ${FRONTEND_URL}
+    depends_on:
+      - postgres
+      - redis
+    restart: always
+    networks:
+      - geoint_net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${BACKEND_URL}
+        NEXT_PUBLIC_WS_URL: ${WS_URL}
+    environment:
+      NODE_ENV: production
+    depends_on:
+      - backend
+    restart: always
+    networks:
+      - geoint_net
+
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./infra/nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/ssl:/etc/nginx/ssl:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - frontend
+      - backend
+    restart: always
+    networks:
+      - geoint_net
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  geoint_net:
+    driver: bridge

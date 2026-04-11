@@ -1,0 +1,145 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --hud-bg: #050a0f;
+  --hud-panel: #0a1520;
+  --hud-border: #0d2137;
+  --hud-cyan: #00d4ff;
+  --hud-green: #00ff88;
+  --hud-amber: #ffaa00;
+  --hud-red: #ff3355;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--hud-bg);
+  color: #a0c4d8;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* MapLibre overrides */
+.maplibregl-map {
+  font-family: 'JetBrains Mono', monospace !important;
+}
+
+.maplibregl-ctrl-attrib {
+  background: rgba(5, 10, 15, 0.8) !important;
+  color: #4a7a99 !important;
+  font-size: 10px !important;
+}
+
+.maplibregl-ctrl-attrib a {
+  color: #00d4ff !important;
+}
+
+.maplibregl-popup-content {
+  background: #0a1520 !important;
+  border: 1px solid #0d2137 !important;
+  border-radius: 4px !important;
+  color: #a0c4d8 !important;
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: 11px !important;
+  padding: 8px 12px !important;
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.1) !important;
+}
+
+.maplibregl-popup-tip {
+  border-top-color: #0d2137 !important;
+  border-bottom-color: #0d2137 !important;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: #050a0f;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #0d2137;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #1a4a6e;
+}
+
+/* HUD panel style */
+.hud-panel {
+  background: rgba(10, 21, 32, 0.92);
+  border: 1px solid #0d2137;
+  backdrop-filter: blur(8px);
+}
+
+.hud-panel-bright {
+  background: rgba(10, 21, 32, 0.95);
+  border: 1px solid #1a4a6e;
+  backdrop-filter: blur(12px);
+}
+
+/* Scan line effect */
+.scan-line::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.3), transparent);
+  animation: scan 4s linear infinite;
+}
+
+/* Glow effects */
+.glow-cyan {
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.3), 0 0 20px rgba(0, 212, 255, 0.1);
+}
+
+.glow-red {
+  box-shadow: 0 0 10px rgba(255, 51, 85, 0.3), 0 0 20px rgba(255, 51, 85, 0.1);
+}
+
+.text-glow-cyan {
+  text-shadow: 0 0 8px rgba(0, 212, 255, 0.6);
+}
+
+/* Flight marker */
+.flight-marker {
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.flight-marker:hover {
+  transform: scale(1.5);
+}
+
+/* Radix UI overrides */
+[data-radix-slider-thumb] {
+  background: #00d4ff !important;
+  border: 2px solid #0a1520 !important;
+  width: 14px !important;
+  height: 14px !important;
+}
+
+[data-radix-slider-track] {
+  background: #0d2137 !important;
+  height: 3px !important;
+}
+
+[data-radix-slider-range] {
+  background: #00d4ff !important;
+}
