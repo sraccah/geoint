@@ -33,29 +33,56 @@ export const SATELLITE_GROUPS: SatelliteGroup[] = [
 ];
 
 // ── Fetch from CelesTrak ──────────────────────────────────────────────────────
+// Groups that have supplemental TLE data (higher frequency, avoids "not updated" throttle)
+const SUPPLEMENTAL_GROUPS: Record<string, string> = {
+    starlink: 'starlink',
+    oneweb: 'oneweb',
+};
+
+async function fetchSupplemental(file: string, maxCount?: number): Promise<SatelliteGP[]> {
+    const res = await axios.get<SatelliteGP[] | string>(CELESTRAK_SUPPLEMENTAL, {
+        params: { FILE: file, FORMAT: 'JSON' },
+        timeout: 25000,
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; GeoINT/1.0)', 'Accept': 'application/json, */*' },
+    });
+    if (!Array.isArray(res.data)) return [];
+    let data = res.data;
+    if (maxCount && data.length > maxCount) data = data.slice(0, maxCount);
+    return data;
+}
+
 async function fetchFromCelesTrak(group: SatelliteGroup): Promise<SatelliteGP[]> {
+    // Use supplemental endpoint for Starlink/OneWeb — not subject to "not updated" throttle
+    if (SUPPLEMENTAL_GROUPS[group.id]) {
+        try {
+            const data = await fetchSupplemental(SUPPLEMENTAL_GROUPS[group.id], group.maxCount);
+            if (data.length > 0) {
+                console.log(`[Satellites] ${group.label}: ${data.length} objects (supplemental)`);
+                return data;
+            }
+        } catch (err) {
+            console.warn(`[Satellites] ${group.label} supplemental failed:`, (err as Error).message);
+        }
+    }
+
     const res = await axios.get<SatelliteGP[] | string>(CELESTRAK_BASE, {
         params: { GROUP: group.celestrakGroup, FORMAT: 'JSON' },
         timeout: 25000,
         headers: {
-            // CelesTrak blocks 'GeoINT-OSINT/1.0' with 403 — use browser UA
             'User-Agent': 'Mozilla/5.0 (compatible; GeoINT/1.0)',
             'Accept': 'application/json, text/plain, */*',
         },
     });
 
-    // CelesTrak returns plain text when data unchanged since last fetch:
-    // "GP data has not updated since your last successful download..."
-    // In that case return [] so the caller falls back to DB/cache
+    // CelesTrak returns plain text "GP data has not updated since your last successful download..."
+    // when the data hasn't changed since our last fetch (tracked by IP)
     if (typeof res.data === 'string' || !Array.isArray(res.data)) {
-        console.log(`[Satellites] ${group.label}: CelesTrak data unchanged, using cache`);
-        return [];
+        console.log(`[Satellites] ${group.label}: CelesTrak data unchanged`);
+        return []; // caller falls back to DB
     }
 
     let data = res.data;
-    if (group.maxCount && data.length > group.maxCount) {
-        data = data.slice(0, group.maxCount);
-    }
+    if (group.maxCount && data.length > group.maxCount) data = data.slice(0, group.maxCount);
     return data;
 }
 

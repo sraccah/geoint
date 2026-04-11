@@ -46,40 +46,54 @@ interface Props {
 export function SatelliteLayer({ mapRef, styleReady }: Props) {
     const markersRef = useRef<Map<number, maplibregl.Marker>>(new Map());
     const intervalRef = useRef<NodeJS.Timeout | null>(null);
+    const orbitReadyRef = useRef(false);
     const { getVisibleSatellites, selectedSatellite, selectSatellite, visibleGroups, orbitFilter } = useSatelliteStore();
 
-    // Add orbit source/layer once style is ready
+    // Add orbit source/layer — poll until map style is ready
     useEffect(() => {
-        const map = mapRef.current;
-        if (!map || !styleReady.current) return;
+        const tryAdd = () => {
+            const map = mapRef.current;
+            if (!map || !styleReady.current) return false;
+            if (orbitReadyRef.current) return true;
+            try {
+                if (!map.getSource(ORBIT_SOURCE)) {
+                    map.addSource(ORBIT_SOURCE, {
+                        type: 'geojson',
+                        data: { type: 'FeatureCollection', features: [] },
+                    });
+                    map.addLayer({
+                        id: ORBIT_LAYER,
+                        type: 'line',
+                        source: ORBIT_SOURCE,
+                        layout: { 'line-join': 'round', 'line-cap': 'round' },
+                        paint: {
+                            'line-color': '#00d4ff',
+                            'line-width': 1,
+                            'line-opacity': 0.5,
+                            'line-dasharray': [4, 3],
+                        },
+                    });
+                }
+                orbitReadyRef.current = true;
+                return true;
+            } catch { return false; }
+        };
 
-        if (!map.getSource(ORBIT_SOURCE)) {
-            map.addSource(ORBIT_SOURCE, {
-                type: 'geojson',
-                data: { type: 'FeatureCollection', features: [] },
-            });
-            map.addLayer({
-                id: ORBIT_LAYER,
-                type: 'line',
-                source: ORBIT_SOURCE,
-                layout: { 'line-join': 'round', 'line-cap': 'round' },
-                paint: {
-                    'line-color': '#00d4ff',
-                    'line-width': 1,
-                    'line-opacity': 0.5,
-                    'line-dasharray': [4, 3],
-                },
-            });
+        if (!tryAdd()) {
+            // Style not ready yet — poll every 500ms
+            const poll = setInterval(() => { if (tryAdd()) clearInterval(poll); }, 500);
+            return () => clearInterval(poll);
         }
     }, [mapRef, styleReady]);
 
     // Draw orbit path for selected satellite
     useEffect(() => {
         const map = mapRef.current;
-        if (!map || !styleReady.current) return;
+        if (!map) return;
 
+        // Wait for orbit source to be ready
         const src = map.getSource(ORBIT_SOURCE) as maplibregl.GeoJSONSource | undefined;
-        if (!src) return;
+        if (!src) return; // will retry when orbitReadyRef triggers
 
         if (!selectedSatellite) {
             src.setData({ type: 'FeatureCollection', features: [] });
