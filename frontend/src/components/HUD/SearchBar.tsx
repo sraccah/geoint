@@ -2,10 +2,12 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Search, X, Plane, Camera, Loader } from 'lucide-react';
+import { Search, X, Plane, Camera, Loader, Satellite } from 'lucide-react';
 import { Flight, Camera as CameraType } from '@/types';
+import { SatelliteGP } from '@/types/satellite';
 import { useFlightStore } from '@/store/flightStore';
 import { useUIStore } from '@/store/uiStore';
+import { useSatelliteStore } from '@/store/satelliteStore';
 import { getCategoryColor, formatAltitude, formatSpeed } from '@/lib/utils';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
@@ -13,6 +15,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 interface SearchResults {
     flights: Flight[];
     cameras: CameraType[];
+    satellites: SatelliteGP[];
     total: number;
 }
 
@@ -23,9 +26,6 @@ export function SearchBar() {
     const [open, setOpen] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
     const debounceRef = useRef<NodeJS.Timeout | null>(null);
-
-    const { selectFlight } = useFlightStore();
-    const { selectCamera } = useUIStore();
 
     const search = useCallback(async (q: string) => {
         if (q.trim().length < 2) { setResults(null); return; }
@@ -46,18 +46,23 @@ export function SearchBar() {
         return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
     }, [query, search]);
 
+    const { selectFlight } = useFlightStore();
+    const { selectCamera } = useUIStore();
+    const { selectSatellite } = useSatelliteStore();
+
     const handleFlightSelect = (flight: Flight) => {
         selectFlight(flight);
-        setOpen(false);
-        setQuery('');
-        setResults(null);
+        setOpen(false); setQuery(''); setResults(null);
     };
 
     const handleCameraSelect = (camera: CameraType) => {
         selectCamera(camera);
-        setOpen(false);
-        setQuery('');
-        setResults(null);
+        setOpen(false); setQuery(''); setResults(null);
+    };
+
+    const handleSatelliteSelect = (sat: SatelliteGP) => {
+        selectSatellite(sat);
+        setOpen(false); setQuery(''); setResults(null);
     };
 
     const clear = () => { setQuery(''); setResults(null); setOpen(false); };
@@ -174,6 +179,34 @@ export function SearchBar() {
                                         {c.country && <span>{c.country}</span>}
                                         <span className="px-1.5 py-0.5 rounded border border-hud-green/30 text-hud-green text-[9px]">
                                             {c.type}
+                                        </span>
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Satellites */}
+                    {results && results.satellites && results.satellites.length > 0 && (
+                        <div>
+                            <div className="px-3 py-1.5 font-mono text-[10px] text-hud-text-dim tracking-wider border-b border-hud-border flex items-center gap-1.5">
+                                <Satellite size={9} className="text-hud-cyan" />
+                                SATELLITES ({results.satellites.length})
+                            </div>
+                            {results.satellites.slice(0, 10).map((s) => (
+                                <button
+                                    key={s.NORAD_CAT_ID}
+                                    onClick={() => handleSatelliteSelect(s)}
+                                    className="w-full flex items-center justify-between px-3 py-2 hover:bg-hud-border/30 transition-colors border-b border-hud-border/30"
+                                >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <Satellite size={10} className="text-hud-cyan shrink-0" />
+                                        <span className="font-mono text-xs text-hud-text truncate">{s.OBJECT_NAME}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 shrink-0 font-mono text-[10px] text-hud-text-dim">
+                                        <span>#{s.NORAD_CAT_ID}</span>
+                                        <span className="px-1.5 py-0.5 rounded border border-hud-cyan/30 text-hud-cyan text-[9px]">
+                                            {s.INCLINATION.toFixed(1)}° inc
                                         </span>
                                     </div>
                                 </button>

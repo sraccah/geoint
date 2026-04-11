@@ -12,6 +12,7 @@ import { getCategoryColor } from '@/lib/utils';
 import { FlightPopup } from './FlightPopup';
 import { MapControls } from './MapControls';
 import { IntelTicker } from './IntelTicker';
+import { SatelliteLayer } from './SatelliteLayer';
 import { MAP_STYLES, MapStyleDef, DEFAULT_STYLE_ID } from '@/lib/mapStyles';
 
 const GLOBE_ZOOM = 5;
@@ -386,6 +387,9 @@ export default function MapView() {
     return (
         <div className="relative w-full h-full">
             <div ref={mapContainer} className="w-full h-full" />
+
+            {/* Satellite layer — renders markers via MapLibre */}
+            <SatelliteLayer mapRef={mapRef} styleReady={styleReadyRef} />
 
             {/* Globe/2D badge */}
             <div className="absolute top-3 left-3 z-10 font-mono text-[10px] px-2 py-1 rounded border pointer-events-none"

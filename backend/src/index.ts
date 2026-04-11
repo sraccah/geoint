@@ -7,6 +7,7 @@ import { flightRoutes } from './routes/flights';
 import { cameraRoutes } from './routes/cameras';
 import { websocketRoutes } from './websocket/flightStream';
 import { searchRoutes } from './routes/search';
+import { satelliteRoutes } from './routes/satellites';
 import { flightPoller } from './services/flightPoller';
 import { getRedis } from './services/redis';
 import { getPool } from './services/database';
@@ -45,6 +46,7 @@ async function bootstrap(): Promise<void> {
     await fastify.register(flightRoutes);
     await fastify.register(cameraRoutes);
     await fastify.register(searchRoutes);
+    await fastify.register(satelliteRoutes);
     await fastify.register(websocketRoutes);
 
     // Start server

@@ -70,9 +70,29 @@ CREATE INDEX IF NOT EXISTS idx_flight_history_flight_id ON flight_history(flight
 CREATE INDEX IF NOT EXISTS idx_flight_history_recorded_at ON flight_history(recorded_at);
 CREATE INDEX IF NOT EXISTS idx_flight_history_position ON flight_history USING GIST(position);
 
--- Auto-cleanup old history (keep 2 hours)
-CREATE OR REPLACE FUNCTION cleanup_old_history() RETURNS void AS $$
-BEGIN
-  DELETE FROM flight_history WHERE recorded_at < NOW() - INTERVAL '2 hours';
-END;
-$$ LANGUAGE plpgsql;
+-- Satellites table — stores TLE/GP orbital elements
+CREATE TABLE IF NOT EXISTS satellites (
+  id SERIAL PRIMARY KEY,
+  norad_id INTEGER NOT NULL UNIQUE,
+  object_name VARCHAR(64) NOT NULL,
+  object_id VARCHAR(16),
+  group_id VARCHAR(32) NOT NULL,
+  epoch TIMESTAMP WITH TIME ZONE,
+  mean_motion DOUBLE PRECISION,
+  eccentricity DOUBLE PRECISION,
+  inclination DOUBLE PRECISION,
+  ra_of_asc_node DOUBLE PRECISION,
+  arg_of_pericenter DOUBLE PRECISION,
+  mean_anomaly DOUBLE PRECISION,
+  bstar DOUBLE PRECISION,
+  mean_motion_dot DOUBLE PRECISION,
+  mean_motion_ddot DOUBLE PRECISION,
+  classification_type CHAR(1) DEFAULT 'U',
+  rev_at_epoch INTEGER,
+  element_set_no INTEGER,
+  fetched_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_satellites_norad_id ON satellites(norad_id);
+CREATE INDEX IF NOT EXISTS idx_satellites_group_id ON satellites(group_id);
+CREATE INDEX IF NOT EXISTS idx_satellites_epoch ON satellites(epoch);
