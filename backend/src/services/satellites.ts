@@ -32,13 +32,25 @@ export const SATELLITE_GROUPS: SatelliteGroup[] = [
 
 // ── Fetch from CelesTrak ──────────────────────────────────────────────────────
 async function fetchFromCelesTrak(group: SatelliteGroup): Promise<SatelliteGP[]> {
-    const res = await axios.get<SatelliteGP[]>(CELESTRAK_BASE, {
+    const res = await axios.get<SatelliteGP[] | string>(CELESTRAK_BASE, {
         params: { GROUP: group.celestrakGroup, FORMAT: 'JSON' },
         timeout: 25000,
-        headers: { 'User-Agent': 'GeoINT-OSINT/1.0' },
+        headers: {
+            // CelesTrak blocks 'GeoINT-OSINT/1.0' with 403 — use browser UA
+            'User-Agent': 'Mozilla/5.0 (compatible; GeoINT/1.0)',
+            'Accept': 'application/json, text/plain, */*',
+        },
     });
 
-    let data = res.data || [];
+    // CelesTrak returns plain text when data unchanged since last fetch:
+    // "GP data has not updated since your last successful download..."
+    // In that case return [] so the caller falls back to DB/cache
+    if (typeof res.data === 'string' || !Array.isArray(res.data)) {
+        console.log(`[Satellites] ${group.label}: CelesTrak data unchanged, using cache`);
+        return [];
+    }
+
+    let data = res.data;
     if (group.maxCount && data.length > group.maxCount) {
         data = data.slice(0, group.maxCount);
     }
@@ -170,16 +182,38 @@ export async function getSatelliteGroup(groupId: string): Promise<SatelliteGP[]>
         console.log(`[Satellites] Fetching ${group.label} from CelesTrak...`);
         const data = await fetchFromCelesTrak(group);
 
+        if (data.length === 0) {
+            // CelesTrak said "data unchanged" — try DB with relaxed time window
+            try {
+                const db = getPool();
+                const result = await db.query<SatelliteGP>(
+                    `SELECT norad_id AS "NORAD_CAT_ID", object_name AS "OBJECT_NAME",
+                     object_id AS "OBJECT_ID",
+                     TO_CHAR(epoch, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "EPOCH",
+                     mean_motion AS "MEAN_MOTION", eccentricity AS "ECCENTRICITY",
+                     inclination AS "INCLINATION", ra_of_asc_node AS "RA_OF_ASC_NODE",
+                     arg_of_pericenter AS "ARG_OF_PERICENTER", mean_anomaly AS "MEAN_ANOMALY",
+                     bstar AS "BSTAR", mean_motion_dot AS "MEAN_MOTION_DOT",
+                     mean_motion_ddot AS "MEAN_MOTION_DDOT",
+                     classification_type AS "CLASSIFICATION_TYPE",
+                     rev_at_epoch AS "REV_AT_EPOCH", element_set_no AS "ELEMENT_SET_NO"
+                     FROM satellites WHERE group_id = $1 ORDER BY norad_id`,
+                    [groupId]
+                );
+                if (result.rows.length > 0) {
+                    console.log(`[Satellites] ${group.label}: ${result.rows.length} objects (DB fallback after unchanged)`);
+                    await cacheSet(cacheKey, result.rows, CACHE_TTL_SECONDS);
+                    return result.rows;
+                }
+            } catch { /* ignore */ }
+            return [];
+        }
+
         console.log(`[Satellites] ${group.label}: ${data.length} objects (from CelesTrak)`);
-
-        // Cache in Redis
         await cacheSet(cacheKey, data, CACHE_TTL_SECONDS);
-
-        // Persist to DB (non-blocking)
         saveSatellitesToDB(groupId, data).catch((err) =>
             console.error(`[Satellites] DB persist error:`, err.message)
         );
-
         return data;
     } catch (err) {
         console.error(`[Satellites] CelesTrak fetch failed for ${groupId}:`, (err as Error).message);

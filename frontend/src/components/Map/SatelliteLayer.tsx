@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import maplibregl from 'maplibre-gl';
-import { useSatelliteStore } from '@/store/satelliteStore';
-import { computePosition, computeOrbitPath } from '@/lib/satelliteUtils';
+import { useSatelliteStore, OrbitType } from '@/store/satelliteStore';
+import { computePosition, computeOrbitPath, getOrbitalInfo } from '@/lib/satelliteUtils';
 import { SatelliteGP } from '@/types/satellite';
 
 const ORBIT_SOURCE = 'satellite-orbit';
@@ -46,7 +46,7 @@ interface Props {
 export function SatelliteLayer({ mapRef, styleReady }: Props) {
     const markersRef = useRef<Map<number, maplibregl.Marker>>(new Map());
     const intervalRef = useRef<NodeJS.Timeout | null>(null);
-    const { getAllActiveSatellites, selectedSatellite, selectSatellite, activeGroups } = useSatelliteStore();
+    const { getVisibleSatellites, selectedSatellite, selectSatellite, visibleGroups, orbitFilter } = useSatelliteStore();
 
     // Add orbit source/layer once style is ready
     useEffect(() => {
@@ -123,21 +123,25 @@ export function SatelliteLayer({ mapRef, styleReady }: Props) {
         const map = mapRef.current;
         if (!map) return;
 
-        const allSats = getAllActiveSatellites();
+        const allSats = getVisibleSatellites();
         const now = new Date();
         const currentIds = new Set<number>();
 
-        // Determine group for each satellite (for color)
+        const { satellites, visibleGroups: vg, orbitFilter } = useSatelliteStore.getState();
         const groupMap = new Map<number, string>();
-        const { satellites, activeGroups: ag } = useSatelliteStore.getState();
-        for (const groupId of ag) {
-            const sats = satellites.get(groupId) || [];
-            for (const s of sats) groupMap.set(s.NORAD_CAT_ID, groupId);
+        for (const groupId of vg) {
+            for (const s of (satellites.get(groupId) || [])) {
+                groupMap.set(s.NORAD_CAT_ID, groupId);
+            }
         }
 
         for (const sat of allSats) {
             const pos = computePosition(sat, now);
             if (!pos) continue;
+
+            // Apply orbit type filter
+            const orbital = getOrbitalInfo(sat);
+            if (!orbitFilter.includes(orbital.orbitType as OrbitType)) continue;
 
             currentIds.add(sat.NORAD_CAT_ID);
             const groupId = groupMap.get(sat.NORAD_CAT_ID) || 'stations';
@@ -151,7 +155,7 @@ export function SatelliteLayer({ mapRef, styleReady }: Props) {
                 existing.getElement().style.filter = isSelected ? `drop-shadow(0 0 5px ${color})` : '';
             } else {
                 const el = makeSatEl(color, isStation);
-                el.title = sat.OBJECT_NAME;
+                el.title = `${sat.OBJECT_NAME} — ${orbital.orbitType} ${Math.round(orbital.altitude).toLocaleString()}km`;
                 el.style.filter = isSelected ? `drop-shadow(0 0 5px ${color})` : '';
                 el.addEventListener('click', (e) => {
                     e.stopPropagation();
@@ -164,20 +168,20 @@ export function SatelliteLayer({ mapRef, styleReady }: Props) {
             }
         }
 
-        // Remove stale markers
+        // Remove stale / filtered-out markers
         markersRef.current.forEach((marker, id) => {
             if (!currentIds.has(id)) {
                 marker.remove();
                 markersRef.current.delete(id);
             }
         });
-    }, [getAllActiveSatellites, selectedSatellite, selectSatellite]);
+    }, [getVisibleSatellites, selectedSatellite, selectSatellite]);
 
-    // Start/stop update loop based on active groups
+    // Restart update loop when visible groups or orbit filter changes
     useEffect(() => {
         if (intervalRef.current) clearInterval(intervalRef.current);
 
-        if (activeGroups.size === 0) {
+        if (visibleGroups.size === 0) {
             markersRef.current.forEach((m) => m.remove());
             markersRef.current.clear();
             return;
@@ -186,7 +190,7 @@ export function SatelliteLayer({ mapRef, styleReady }: Props) {
         updatePositions();
         intervalRef.current = setInterval(updatePositions, UPDATE_INTERVAL);
         return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-    }, [activeGroups, updatePositions]);
+    }, [visibleGroups, orbitFilter, updatePositions]);
 
     return null; // renders via MapLibre markers
 }

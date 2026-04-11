@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "README Auto-Update",
+  "description": "At the end of each agent session, updates README.md with accurate line counts and documents any new features added during the session",
+  "version": "1",
+  "when": {
+    "type": "agentStop"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "The agent session just ended. Run: wc -l $(find backend/src -name \"*.ts\") $(find frontend/src -name \"*.ts\" -o -name \"*.tsx\") 2>/dev/null | tail -1 to get the current total line count. Then update README.md to reflect: 1) the accurate total line count, 2) any new files added this session with their line counts in the codebase section, 3) any new features documented in the features section. Keep it concise — only update what actually changed. Do not rewrite the whole README."
+  }
+}
