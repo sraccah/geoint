@@ -15,10 +15,12 @@ import { cacheGet, cacheSet } from './redis';
 import { SatelliteGP, SatelliteGroup } from '../types';
 
 const CELESTRAK_BASE = 'https://celestrak.org/NORAD/elements/gp.php';
+const CELESTRAK_SUPPLEMENTAL = 'https://celestrak.org/NORAD/elements/supplemental/sup-gp.php';
 const CACHE_TTL_SECONDS = 6 * 3600; // 6 hours
 
 export const SATELLITE_GROUPS: SatelliteGroup[] = [
     { id: 'stations', label: 'Space Stations', color: '#00d4ff', icon: '🛸', description: 'ISS, Tiangong, CSS', celestrakGroup: 'stations' },
+    // Starlink uses supplemental endpoint (higher frequency updates, avoids "not updated" throttle)
     { id: 'starlink', label: 'Starlink', color: '#aa44ff', icon: '🔵', description: 'SpaceX Starlink constellation', celestrakGroup: 'starlink', maxCount: 500 },
     { id: 'gps', label: 'GPS', color: '#00ff88', icon: '📡', description: 'US GPS navigation (NAVSTAR)', celestrakGroup: 'gps-ops' },
     { id: 'glonass', label: 'GLONASS', color: '#44aaff', icon: '📡', description: 'Russian GLONASS navigation', celestrakGroup: 'glo-ops' },
