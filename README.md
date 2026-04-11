@@ -256,7 +256,7 @@ geoint/
 └── .env.example                    # All configuration options documented
 ```
 
-**Total: ~6,060 lines of TypeScript across 49 files**
+**Total: ~6,073 lines of TypeScript across 49 files**
 
 ---
 
