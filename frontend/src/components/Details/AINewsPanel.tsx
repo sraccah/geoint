@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import axios from 'axios';
 import { Brain, AlertTriangle, Radio, Globe, Clock, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAIStore } from '@/store/aiStore';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -64,12 +65,25 @@ export function AINewsPanel() {
         }
     };
 
+    // Track WebSocket AI alerts — when new ones arrive, refresh from DB
+    const wsAlerts = useAIStore((s) => s.alerts);
+    const lastWsUpdate = useAIStore((s) => s.lastGenerated);
+    const prevWsUpdate = useRef<number | null>(null);
+
     useEffect(() => {
         fetchHistory();
-        // Refresh every 5 minutes
         const interval = setInterval(fetchHistory, 300000);
         return () => clearInterval(interval);
     }, []);
+
+    // Auto-refresh when new AI alerts arrive via WebSocket
+    useEffect(() => {
+        if (lastWsUpdate && lastWsUpdate !== prevWsUpdate.current) {
+            prevWsUpdate.current = lastWsUpdate;
+            // Small delay to let the DB write complete
+            setTimeout(fetchHistory, 2000);
+        }
+    }, [lastWsUpdate]);
 
     // Flatten all alerts from all history entries, newest first
     const allAlerts = history.flatMap((entry) =>
