@@ -74,17 +74,23 @@ function buildDataSummary(flights: Flight[], stats: FlightStats): string {
         .map((f) => f.callsign || f.flight_id.toUpperCase())
         .join(', ');
 
+    const milPct = stats.airborne > 0 ? ((military.length / stats.airborne) * 100).toFixed(1) : '0';
+
     return `LIVE GLOBAL AIRSPACE DATA (${new Date().toUTCString()}):
 - Total airborne: ${stats.airborne.toLocaleString()} aircraft
-- Commercial: ${stats.commercial} | Cargo: ${stats.cargo} | Military: ${stats.military} | Helicopter: ${stats.helicopter}
+- Commercial: ${stats.commercial} (${stats.airborne > 0 ? ((stats.commercial / stats.airborne) * 100).toFixed(1) : 0}%)
+- Cargo: ${stats.cargo} (${stats.airborne > 0 ? ((stats.cargo / stats.airborne) * 100).toFixed(1) : 0}%)
+- Military: ${stats.military} (${milPct}% of airborne)
+- Helicopter: ${stats.helicopter}
 - On ground: ${stats.on_ground}
-- Military aircraft airborne: ${military.length}
 - Military at high altitude (>12km): ${highAlt}
 - Emergency squawk 7700: ${emergencies}
 - Hijack squawk 7500: ${hijacks}
 - Military geographic distribution: ${topRegions || 'dispersed globally'}
 - Notable military callsigns: ${milCallsigns || 'none identified'}
-- Active cargo hubs: ${cargo.length} cargo aircraft airborne`;
+- Cargo aircraft airborne: ${cargo.length}
+
+IMPORTANT: When reporting numbers, always include percentages. Do not report raw counts without context.`;
 }
 
 function getRegion(lat: number, lon: number): string {
