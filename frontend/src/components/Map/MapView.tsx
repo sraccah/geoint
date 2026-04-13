@@ -140,10 +140,17 @@ export default function MapView() {
             canvas.style.filter = initialStyle.canvasFilter || '';
             canvasFilterRef.current = initialStyle.canvasFilter || '';
 
-            // Globe projection (only works with vector styles)
+            // Globe projection — works with vector styles, visual globe with raster at low zoom
             try {
                 map.setProjection({ type: 'globe' });
-                setIsGlobe(true);
+            } catch {
+                // Raster styles don't support setProjection — but MapLibre 5
+                // still renders them on a sphere at low zoom levels
+            }
+            // At zoom < GLOBE_ZOOM, the map always looks like a globe regardless of style type
+            setIsGlobe(map.getZoom() < GLOBE_ZOOM);
+
+            try {
                 map.setFog({
                     color: 'rgba(5,10,15,0.8)',
                     'high-color': 'rgba(0,15,40,0.9)',
@@ -151,10 +158,8 @@ export default function MapView() {
                     'space-color': '#020508',
                     'star-intensity': 0.9,
                 });
-                applyDarkTheme(map);
-            } catch {
-                setIsGlobe(false);
-            }
+            } catch { /* fog not supported on all styles */ }
+            applyDarkTheme(map);
 
             addOverlayLayers(map);
         });
@@ -166,12 +171,16 @@ export default function MapView() {
             const z = map.getZoom();
             setCoords((c) => ({ ...c, zoom: z }));
             if (!styleReadyRef.current) return;
-            // Skip for 2s after style load — prevents race with style.load's setIsGlobe
             if (Date.now() - styleLoadedAt < 2000) return;
+
+            // Globe state based on zoom level — works for both vector and raster styles
+            const nowGlobe = z < GLOBE_ZOOM;
+            setIsGlobe(nowGlobe);
+
+            // Try to set projection explicitly (only works on vector styles)
             try {
-                if (z >= GLOBE_ZOOM) { map.setProjection({ type: 'mercator' }); setIsGlobe(false); }
-                else { map.setProjection({ type: 'globe' }); setIsGlobe(true); }
-            } catch { /* raster styles don't support projection */ }
+                map.setProjection({ type: nowGlobe ? 'globe' : 'mercator' });
+            } catch { /* raster styles — visual globe handled by MapLibre automatically */ }
         });
 
         map.on('move', () => {
@@ -211,12 +220,12 @@ export default function MapView() {
             styleReadyRef.current = true;
             setStyleLoaded(true);
 
-            // Try globe (vector styles only)
+            const z = map.getZoom();
+            setIsGlobe(z < GLOBE_ZOOM); // zoom-based, always correct
+
             try {
-                const z = map.getZoom();
                 if (z < GLOBE_ZOOM) {
                     map.setProjection({ type: 'globe' });
-                    setIsGlobe(true);
                     map.setFog({
                         color: 'rgba(5,10,15,0.8)',
                         'high-color': 'rgba(0,15,40,0.9)',
@@ -226,12 +235,11 @@ export default function MapView() {
                     });
                 } else {
                     map.setProjection({ type: 'mercator' });
-                    setIsGlobe(false);
                 }
                 // Dark theme for vector styles
                 if (styleDef.id === 'dark' || styleDef.id === 'crt') applyDarkTheme(map);
             } catch {
-                setIsGlobe(false);
+                // setProjection failed (raster style) — isGlobe already set by zoom check above
             }
 
             addOverlayLayers(map);
