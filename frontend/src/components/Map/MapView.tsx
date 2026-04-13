@@ -132,6 +132,7 @@ export default function MapView() {
 
         map.on('style.load', () => {
             styleReadyRef.current = true;
+            styleLoadedAt = Date.now();
             setStyleLoaded(true);
 
             // Apply canvas filter for the initial style (e.g. night mode)
@@ -158,10 +159,15 @@ export default function MapView() {
             addOverlayLayers(map);
         });
 
+        // Track when style loaded to avoid zoom handler racing with style.load
+        let styleLoadedAt = 0;
+
         map.on('zoom', () => {
             const z = map.getZoom();
             setCoords((c) => ({ ...c, zoom: z }));
             if (!styleReadyRef.current) return;
+            // Skip for 2s after style load — prevents race with style.load's setIsGlobe
+            if (Date.now() - styleLoadedAt < 2000) return;
             try {
                 if (z >= GLOBE_ZOOM) { map.setProjection({ type: 'mercator' }); setIsGlobe(false); }
                 else { map.setProjection({ type: 'globe' }); setIsGlobe(true); }
