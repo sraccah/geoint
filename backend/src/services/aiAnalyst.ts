@@ -12,11 +12,25 @@ import axios from 'axios';
 import { Flight, FlightStats } from '../types';
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://host.docker.internal:11434';
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma4:latest';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'mistral:latest';
 const ANALYSIS_INTERVAL_MS = parseInt(process.env.AI_NEWS_INTERVAL || '600000', 10);
-// AI_NEWS_ENABLED env var sets the DEFAULT — actual runtime state stored in Redis
 const AI_DEFAULT_ENABLED = process.env.AI_NEWS_ENABLED !== 'false';
 const AI_REDIS_KEY = 'geoint:ai:enabled';
+
+// Generation quality params — all tunable via env vars
+const AI_NUM_PREDICT = parseInt(process.env.AI_NUM_PREDICT || '150', 10);
+const AI_NUM_CTX = parseInt(process.env.AI_NUM_CTX || '1024', 10);
+const AI_TEMPERATURE = parseFloat(process.env.AI_TEMPERATURE || '0.3');
+const AI_KEEP_ALIVE = parseInt(process.env.AI_KEEP_ALIVE || '0', 10); // 0 = unload after gen
+const AI_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS || '60000', 10);
+const AI_BACKGROUND_INTERVAL_MS = parseInt(process.env.AI_BACKGROUND_INTERVAL || '3600000', 10); // 1h
+const AI_BACKGROUND_FIRST_MS = parseInt(process.env.AI_BACKGROUND_FIRST || '1800000', 10);    // 30min
+
+// Warn if using a large model — recommend smaller ones for this task
+const LARGE_MODELS = ['gemma4', 'llama3.1', 'llama3.2', 'deepseek-r1:14b', 'gemma3:12b', 'phi4'];
+if (LARGE_MODELS.some(m => OLLAMA_MODEL.startsWith(m))) {
+    console.warn(`[AI Analyst] ⚠ Model ${OLLAMA_MODEL} is large. For better performance, consider: mistral:latest, llama3.2:3b, phi3:mini, qwen2.5:3b`);
+}
 
 export interface AIAlert {
     id: string;
@@ -109,14 +123,21 @@ async function callOllama(dataSummary: string): Promise<string> {
             system: SYSTEM_PROMPT,
             stream: false,
             options: {
-                temperature: 0.3,  // low temperature for factual output
-                num_predict: 400,  // limit response length
+                temperature: AI_TEMPERATURE,
+                num_predict: AI_NUM_PREDICT,
                 top_p: 0.9,
+                num_ctx: AI_NUM_CTX,
             },
+            keep_alive: AI_KEEP_ALIVE,
         },
-        { timeout: 30_000 }
+        { timeout: AI_TIMEOUT_MS }
     );
     return response.data.response as string;
+}
+        },
+{ timeout: 60_000 }  // large models can take time on first load
+    );
+return response.data.response as string;
 }
 
 function parseAIResponse(raw: string, model: string): AIAlert[] {
@@ -152,11 +173,16 @@ function parseAIResponse(raw: string, model: string): AIAlert[] {
 
 class AIAnalystService {
     private interval: NodeJS.Timeout | null = null;
+    private backgroundInterval: NodeJS.Timeout | null = null;
     private callbacks: AIAlertCallback[] = [];
     private lastAlerts: AIAlert[] = [];
     private isRunning = false;
     private consecutiveErrors = 0;
     private getFlightsFn: (() => Promise<Flight[]>) | null = null;
+    private isGenerating = false; // lock — prevents concurrent Ollama calls
+
+    // Background interval: configurable via AI_BACKGROUND_INTERVAL env var (default 60min)
+    private static readonly BACKGROUND_INTERVAL_MS = AI_BACKGROUND_INTERVAL_MS;
 
     onAlerts(cb: AIAlertCallback): void { this.callbacks.push(cb); }
     getLastAlerts(): AIAlert[] { return this.lastAlerts; }
@@ -178,12 +204,20 @@ class AIAnalystService {
         try {
             const { getRedis } = await import('./redis');
             await getRedis().set(AI_REDIS_KEY, enabled ? 'true' : 'false');
-            console.log(`[AI Analyst] ${enabled ? 'Enabled' : 'Disabled'} via API`);
+            console.log(`[AI Analyst] ${enabled ? 'Enabled (10min interval)' : 'Disabled (background 60min digest)'} via API`);
 
-            if (enabled && !this.isRunning && this.getFlightsFn) {
-                this.startLoop(this.getFlightsFn);
-            } else if (!enabled && this.isRunning) {
+            if (enabled) {
+                // Stop background loop, start active loop
+                this.stopBackground();
+                if (!this.isRunning && this.getFlightsFn) {
+                    this.startLoop(this.getFlightsFn);
+                }
+            } else {
+                // Stop active loop, start background hourly digest
                 this.stopLoop();
+                if (this.getFlightsFn) {
+                    this.startBackground(this.getFlightsFn);
+                }
             }
         } catch (err) {
             console.error('[AI Analyst] Failed to set enabled state:', (err as Error).message);
@@ -193,79 +227,118 @@ class AIAnalystService {
     start(getFlights: () => Promise<Flight[]>, _getStats: () => FlightStats | null): void {
         this.getFlightsFn = getFlights;
 
-        // Initialize Redis key from env default if not already set
         this.isEnabled().then((enabled) => {
-            console.log(`[AI Analyst] Initial state: ${enabled ? 'ENABLED' : 'DISABLED'} (env default: ${AI_DEFAULT_ENABLED})`);
+            console.log(`[AI Analyst] Initial state: ${enabled ? 'ENABLED (10min)' : 'DISABLED (60min background)'}`);
             if (enabled) {
                 this.startLoop(getFlights);
             } else {
-                console.log(`[AI Analyst] Disabled — toggle via POST /ai/toggle or set AI_NEWS_ENABLED=true`);
+                // Even when disabled, run hourly background digest
+                this.startBackground(getFlights);
             }
         });
+    }
+
+    // Shared generation logic — used by both active and background loops
+    private async runGeneration(getFlights: () => Promise<Flight[]>, label: string): Promise<void> {
+        // Lock — never run two generations concurrently
+        if (this.isGenerating) {
+            console.log(`[AI Analyst] Skipping ${label} — previous generation still running`);
+            return;
+        }
+        this.isGenerating = true;
+
+        try {
+            const flights = await getFlights();
+            if (flights.length === 0) return;
+
+            const airborne = flights.filter(f => !f.on_ground);
+            const stats: FlightStats = {
+                total: flights.length,
+                commercial: airborne.filter(f => f.category === 'commercial').length,
+                cargo: airborne.filter(f => f.category === 'cargo').length,
+                military: airborne.filter(f => f.category === 'military').length,
+                private: airborne.filter(f => f.category === 'private').length,
+                helicopter: airborne.filter(f => f.category === 'helicopter').length,
+                unknown: airborne.filter(f => f.category === 'unknown').length,
+                on_ground: flights.filter(f => f.on_ground).length,
+                airborne: airborne.length,
+            };
+
+            const summary = buildDataSummary(flights, stats);
+            console.log(`[AI Analyst] ${label} — calling Ollama (model: ${OLLAMA_MODEL})...`);
+
+            const raw = await callOllama(summary);
+            const alerts = parseAIResponse(raw, OLLAMA_MODEL);
+
+            if (alerts.length > 0) {
+                this.lastAlerts = alerts;
+                this.consecutiveErrors = 0;
+                console.log(`[AI Analyst] ${label} — generated ${alerts.length} alerts, model unloaded`);
+                this.callbacks.forEach((cb) => cb(alerts));
+            }
+        } catch (err) {
+            this.consecutiveErrors++;
+            if (this.consecutiveErrors <= 3) {
+                console.warn(`[AI Analyst] ${label} error:`, (err as Error).message);
+            }
+        } finally {
+            // Always release lock — model is unloaded by keep_alive:0
+            this.isGenerating = false;
+        }
     }
 
     private startLoop(getFlights: () => Promise<Flight[]>): void {
         if (this.isRunning) return;
         this.isRunning = true;
-        console.log(`[AI Analyst] Starting loop — model: ${OLLAMA_MODEL} @ ${OLLAMA_URL}, interval: ${ANALYSIS_INTERVAL_MS / 1000}s`);
+        console.log(`[AI Analyst] Active loop started — every ${ANALYSIS_INTERVAL_MS / 1000}s`);
 
         const run = async () => {
-            // Re-check enabled state each run (can be toggled mid-interval)
             const enabled = await this.isEnabled();
             if (!enabled) {
                 this.stopLoop();
+                this.startBackground(getFlights);
                 return;
             }
-
-            try {
-                const flights = await getFlights();
-                if (flights.length === 0) return;
-
-                const airborne = flights.filter(f => !f.on_ground);
-                const stats: FlightStats = {
-                    total: flights.length,
-                    commercial: airborne.filter(f => f.category === 'commercial').length,
-                    cargo: airborne.filter(f => f.category === 'cargo').length,
-                    military: airborne.filter(f => f.category === 'military').length,
-                    private: airborne.filter(f => f.category === 'private').length,
-                    helicopter: airborne.filter(f => f.category === 'helicopter').length,
-                    unknown: airborne.filter(f => f.category === 'unknown').length,
-                    on_ground: flights.filter(f => f.on_ground).length,
-                    airborne: airborne.length,
-                };
-
-                const summary = buildDataSummary(flights, stats);
-                console.log('[AI Analyst] Sending data to Ollama...');
-
-                const raw = await callOllama(summary);
-                const alerts = parseAIResponse(raw, OLLAMA_MODEL);
-
-                if (alerts.length > 0) {
-                    this.lastAlerts = alerts;
-                    this.consecutiveErrors = 0;
-                    console.log(`[AI Analyst] Generated ${alerts.length} alerts`);
-                    this.callbacks.forEach((cb) => cb(alerts));
-                }
-            } catch (err) {
-                this.consecutiveErrors++;
-                if (this.consecutiveErrors <= 3) {
-                    console.warn('[AI Analyst] Error:', (err as Error).message);
-                }
-            }
+            await this.runGeneration(getFlights, 'active');
         };
 
         setTimeout(run, 10_000);
         this.interval = setInterval(run, ANALYSIS_INTERVAL_MS);
     }
 
+    // Background mode: hourly digest even when AI toggle is off
+    private startBackground(getFlights: () => Promise<Flight[]>): void {
+        if (this.backgroundInterval) return;
+        console.log(`[AI Analyst] Background mode — hourly digest`);
+
+        const run = async () => {
+            const enabled = await this.isEnabled();
+            if (enabled) {
+                // Active mode took over — stop background
+                this.stopBackground();
+                return;
+            }
+            await this.runGeneration(getFlights, 'background hourly');
+        };
+
+        // First background run after AI_BACKGROUND_FIRST (default 30min)
+        setTimeout(run, AI_BACKGROUND_FIRST_MS);
+        this.backgroundInterval = setInterval(run, AIAnalystService.BACKGROUND_INTERVAL_MS);
+    }
+
+    private stopBackground(): void {
+        if (this.backgroundInterval) { clearInterval(this.backgroundInterval); this.backgroundInterval = null; }
+    }
+
     private stopLoop(): void {
         if (this.interval) { clearInterval(this.interval); this.interval = null; }
         this.isRunning = false;
-        console.log('[AI Analyst] Loop stopped');
+        console.log('[AI Analyst] Active loop stopped');
     }
 
     stop(): void {
         this.stopLoop();
+        this.stopBackground();
     }
 }
 
