@@ -42,12 +42,20 @@ export function IntelTicker() {
     }, [flights]);
 
     // Combine rule-based + AI alerts
+    // AI alerts shown FIRST within the same level — they are more contextual
     const allAlerts: CombinedAlert[] = [
-        ...ruleAlerts.map((a) => ({ ...a, source: 'rule' as const })),
         ...(aiModeEnabled ? aiAlerts.map((a) => ({ ...a, message: a.message, category: a.category })) : []),
+        ...ruleAlerts.map((a) => ({ ...a, source: 'rule' as const })),
     ].sort((a, b) => {
         const order = { critical: 0, warning: 1, info: 2, nominal: 3 };
-        return order[a.level] - order[b.level];
+        const levelDiff = order[a.level] - order[b.level];
+        if (levelDiff !== 0) return levelDiff;
+        // Within same level: AI first
+        const aIsAI = 'source' in a && (a as AIAlert).source === 'ai';
+        const bIsAI = 'source' in b && (b as AIAlert).source === 'ai';
+        if (aIsAI && !bIsAI) return -1;
+        if (!aIsAI && bIsAI) return 1;
+        return 0;
     });
 
     const next = useCallback(() => setCurrentIdx((i) => allAlerts.length > 0 ? (i + 1) % allAlerts.length : 0), [allAlerts.length]);

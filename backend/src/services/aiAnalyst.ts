@@ -18,13 +18,14 @@ const AI_DEFAULT_ENABLED = process.env.AI_NEWS_ENABLED !== 'false';
 const AI_REDIS_KEY = 'geoint:ai:enabled';
 
 // Generation quality params — all tunable via env vars
-const AI_NUM_PREDICT = parseInt(process.env.AI_NUM_PREDICT || '150', 10);
+const AI_NUM_PREDICT = parseInt(process.env.AI_NUM_PREDICT || '400', 10); // 400 tokens allows up to ~8 alerts
 const AI_NUM_CTX = parseInt(process.env.AI_NUM_CTX || '1024', 10);
 const AI_TEMPERATURE = parseFloat(process.env.AI_TEMPERATURE || '0.3');
 const AI_KEEP_ALIVE = parseInt(process.env.AI_KEEP_ALIVE || '0', 10); // 0 = unload after gen
 const AI_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS || '60000', 10);
 const AI_BACKGROUND_INTERVAL_MS = parseInt(process.env.AI_BACKGROUND_INTERVAL || '3600000', 10); // 1h
 const AI_BACKGROUND_FIRST_MS = parseInt(process.env.AI_BACKGROUND_FIRST || '1800000', 10);    // 30min
+const AI_MAX_ALERTS = parseInt(process.env.AI_MAX_ALERTS || '8', 10); // max alerts to keep
 
 // Warn if using a large model — recommend smaller ones for this task
 const LARGE_MODELS = ['gemma4', 'llama3.1', 'llama3.2', 'deepseek-r1:14b', 'gemma3:12b', 'phi4'];
@@ -99,20 +100,21 @@ function getRegion(lat: number, lon: number): string {
 }
 
 const SYSTEM_PROMPT = `You are an OSINT (Open Source Intelligence) analyst monitoring global air traffic in real-time.
-You receive live ADS-B flight data and must generate concise intelligence assessments.
+You receive live ADS-B flight data and must generate intelligence assessments.
 
 Rules:
-- Generate 2-4 SHORT intelligence alerts based on the data
+- Generate as many alerts as the data warrants — one per notable finding, up to ${AI_MAX_ALERTS}
+- Prioritize: CRITICAL first, then WARNING, then INFO, then NOMINAL
 - Each alert must be on its own line in this exact format:
   LEVEL|CATEGORY|MESSAGE|DETAIL
 - LEVEL must be one of: CRITICAL, WARNING, INFO, NOMINAL
 - CATEGORY is a short label (max 20 chars, uppercase)
 - MESSAGE is the alert text (max 100 chars)
 - DETAIL is optional context (max 80 chars, or leave empty)
-- Focus on: unusual military concentrations, emergency squawks, geopolitical patterns, traffic anomalies
-- Be factual and concise — this is a real-time intelligence dashboard
-- Do NOT invent data not present in the summary
-- Do NOT use markdown, bullet points, or any formatting other than the pipe-separated format`;
+- Focus on: military concentrations, emergency squawks, geopolitical patterns, traffic anomalies, unusual activity
+- Be factual — only report what is in the data
+- Do NOT use markdown, bullet points, or any formatting other than the pipe-separated format
+- Do NOT repeat the same finding twice`;
 
 async function callOllama(dataSummary: string): Promise<string> {
     const response = await axios.post(
@@ -163,7 +165,7 @@ function parseAIResponse(raw: string, model: string): AIAlert[] {
         });
     }
 
-    return alerts.slice(0, 5); // max 5 AI alerts
+    return alerts.slice(0, AI_MAX_ALERTS); // configurable via AI_MAX_ALERTS env var
 }
 
 class AIAnalystService {

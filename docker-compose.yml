@@ -58,10 +58,11 @@ services:
       WEBCAMS_TRAVEL_KEY: ${WEBCAMS_TRAVEL_KEY:-}
       # Ollama — runs on host machine, accessible via host.docker.internal
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e2b}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e4b}
       AI_NEWS_ENABLED: ${AI_NEWS_ENABLED:-false}
       AI_NEWS_INTERVAL: ${AI_NEWS_INTERVAL:-600000}
-      AI_NUM_PREDICT: ${AI_NUM_PREDICT:-150}
+      AI_NUM_PREDICT: ${AI_NUM_PREDICT:-400}
+      AI_MAX_ALERTS: ${AI_MAX_ALERTS:-8}
       AI_NUM_CTX: ${AI_NUM_CTX:-1024}
       AI_TEMPERATURE: ${AI_TEMPERATURE:-0.3}
       AI_KEEP_ALIVE: ${AI_KEEP_ALIVE:-0}
