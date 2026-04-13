@@ -77,7 +77,7 @@ export default function MapView() {
     const cameraMarkersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
     const canvasFilterRef = useRef<string>('');
 
-    const [isGlobe, setIsGlobe] = useState(false); // false until style.load confirms globe is active
+    const [isGlobe, setIsGlobe] = useState(true); // true — initial zoom 2 is always globe mode
     const [styleLoaded, setStyleLoaded] = useState(false);
     const [coords, setCoords] = useState({ lat: 25, lng: 10, zoom: 2 });
     const [hoveredFlight, setHoveredFlight] = useState<Flight | null>(null);

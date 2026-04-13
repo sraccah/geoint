@@ -79,10 +79,11 @@ export function analyzeFlights(flights: Flight[]): IntelAlert[] {
 
     // ── 1. Military cluster detection ──────────────────────────────────────────
     const military = airborne.filter((f) => f.category === 'military');
-    const milClusters = clusterFlights(military, 200); // 200km radius
+    // 100km radius — tight enough that "over North America" means actually clustered
+    const milClusters = clusterFlights(military, 100);
 
     for (const cluster of milClusters) {
-        if (cluster.length < 8) continue; // ignore small groups — bases/patrols are normal
+        if (cluster.length < 10) continue; // 10+ is genuinely notable
         const center = clusterCenter(cluster);
         const region = approximateRegion(center.lat, center.lon);
         const callsigns = cluster.map((f) => f.callsign || f.flight_id.toUpperCase()).slice(0, 5).join(', ');
@@ -205,27 +206,13 @@ export function analyzeFlights(flights: Flight[]): IntelAlert[] {
         });
     }
 
-    // ── 7. Global traffic density ───────────────────────────────────────────────
+    // ── 7. Global traffic — only report if genuinely unusual ─────────────────
     const total = airborne.length;
-    if (total > 15000) {
-        alerts.push({
-            id: 'global_traffic_high',
-            level: 'nominal',
-            category: 'GLOBAL AIRSPACE',
-            message: `Peak global air traffic — ${total.toLocaleString()} aircraft airborne`,
-        });
-    } else if (total > 10000) {
-        alerts.push({
-            id: 'global_traffic_normal',
-            level: 'nominal',
-            category: 'GLOBAL AIRSPACE',
-            message: `${total.toLocaleString()} aircraft tracked globally across all sources`,
-        });
-    }
+    // Removed nominal "X aircraft tracked" — it's noise, always shows
 
     // ── 8. Military % anomaly ───────────────────────────────────────────────────
     const milPct = total > 0 ? (military.length / total) * 100 : 0;
-    if (milPct > 12) { // >12% is genuinely anomalous
+    if (milPct > 15) { // >15% is genuinely anomalous (raised from 12%)
         alerts.push({
             id: 'mil_pct_high',
             level: 'warning',

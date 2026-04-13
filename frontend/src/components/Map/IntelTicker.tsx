@@ -34,11 +34,11 @@ export function IntelTicker() {
     const [paused, setPaused] = useState(false);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-    // Re-analyze rule-based alerts on flight updates
+    // Re-analyze rule-based alerts on flight updates — but DON'T reset index
     useEffect(() => {
         if (flights.length === 0) return;
         setRuleAlerts(analyzeFlights(flights));
-        setCurrentIdx(0);
+        // Don't reset currentIdx here — it causes the 1→2→1 loop
     }, [flights]);
 
     // Combine rule-based + AI alerts
