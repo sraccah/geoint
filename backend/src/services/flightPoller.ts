@@ -189,13 +189,12 @@ class FlightPoller {
 
         this.callbacks.forEach((cb) => cb(flights, stats));
 
-        // Only broadcast degraded if airplanes.live (our primary source) also failed
-        // OpenSky rate-limiting alone is normal and expected — don't alarm users
-        const primaryFailed = airplanesResult.status === 'rejected';
-        if (this.status === 'degraded' && primaryFailed) {
+        // Only broadcast degraded warning if we have very few flights
+        // (meaning the working sources aren't compensating for the failed ones)
+        if (this.status === 'degraded' && flights.length < 1000) {
             const failed = statuses.filter((s) => !s.ok).map((s) => s.name).join(', ');
             this.errorCallbacks.forEach((cb) =>
-                cb('degraded', `Degraded: ${failed} unavailable. Showing data from remaining sources.`)
+                cb('degraded', `Some sources unavailable (${failed}). Data may be incomplete.`)
             );
         }
 

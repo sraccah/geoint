@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { WebSocket } from 'ws';
 import { flightPoller } from '../services/flightPoller';
+import { aiAnalyst, AIAlert } from '../services/aiAnalyst';
 import { Flight, FlightStats, WebSocketMessage } from '../types';
 
 interface WSClient {
@@ -83,7 +84,16 @@ export async function websocketRoutes(fastify: FastifyInstance): Promise<void> {
                 timestamp: Date.now(),
             });
 
-            // Also send current poller status if degraded
+            // Send cached AI alerts if available
+            const cachedAlerts = aiAnalyst.getLastAlerts();
+            if (cachedAlerts.length > 0) {
+                sendMessage(socket, {
+                    type: 'ai_alerts',
+                    payload: cachedAlerts,
+                    timestamp: Date.now(),
+                });
+            }
+
             const status = flightPoller.getStatus();
             if (status !== 'ok') {
                 sendMessage(socket, {
@@ -132,6 +142,17 @@ export async function websocketRoutes(fastify: FastifyInstance): Promise<void> {
 
     flightPoller.onUpdate(broadcastFlights);
     flightPoller.onError(broadcastError);
+
+    // Broadcast AI alerts to all clients when new ones are generated
+    aiAnalyst.onAlerts((alerts: AIAlert[]) => {
+        const message: WebSocketMessage = {
+            type: 'ai_alerts',
+            payload: alerts,
+            timestamp: Date.now(),
+        };
+        clients.forEach((client) => sendMessage(client.socket, message));
+        console.log(`[WS] Broadcast ${alerts.length} AI alerts to ${clients.size} clients`);
+    });
 }
 
 export function getConnectedClients(): number {

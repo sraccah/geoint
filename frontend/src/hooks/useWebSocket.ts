@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import { useFlightStore } from '@/store/flightStore';
+import { useAIStore } from '@/store/aiStore';
 import { Flight, FlightStats, WebSocketMessage } from '@/types';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || '';
@@ -14,6 +15,7 @@ export function useWebSocket(): void {
     const reconnectTimer = useRef<NodeJS.Timeout | null>(null);
     const pingTimer = useRef<NodeJS.Timeout | null>(null);
     const { setFlights, setStats, setConnected, setDataSourceError } = useFlightStore();
+    const { setAlerts } = useAIStore();
 
     const connect = useCallback(() => {
         if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -46,10 +48,17 @@ export function useWebSocket(): void {
                         const payload = msg.payload as { flights: Flight[]; stats: FlightStats | null };
                         if (payload.flights) {
                             setFlights(payload.flights);
-                            // Clear any previous error once real data arrives
                             setDataSourceError(null);
                         }
                         if (payload.stats) setStats(payload.stats);
+                    }
+
+                    if (msg.type === 'ai_alerts') {
+                        const alerts = msg.payload as Parameters<typeof setAlerts>[0];
+                        if (Array.isArray(alerts) && alerts.length > 0) {
+                            setAlerts(alerts);
+                            console.log(`[WS] Received ${alerts.length} AI alerts`);
+                        }
                     }
 
                     if (msg.type === 'error') {

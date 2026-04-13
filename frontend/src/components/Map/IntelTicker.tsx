@@ -2,22 +2,24 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useFlightStore } from '@/store/flightStore';
+import { useAIStore, AIAlert } from '@/store/aiStore';
 import { analyzeFlights, IntelAlert } from '@/lib/intelAnalyzer';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, Radio, Globe, ChevronRight, ChevronLeft } from 'lucide-react';
+import { AlertTriangle, Radio, Globe, ChevronRight, ChevronLeft, Brain, Zap } from 'lucide-react';
 
-const ROTATE_INTERVAL = 6000; // ms per alert
+const ROTATE_INTERVAL = 6000;
 
-const LEVEL_STYLES: Record<IntelAlert['level'], { border: string; text: string; bg: string; dot: string }> = {
+type CombinedAlert = (IntelAlert & { source: 'rule' }) | (AIAlert & { message: string; category: string; level: 'critical' | 'warning' | 'info' | 'nominal' });
+
+const LEVEL_STYLES: Record<string, { border: string; text: string; bg: string; dot: string }> = {
     critical: { border: '#ff3355', text: '#ff3355', bg: 'rgba(255,51,85,0.08)', dot: 'bg-red-500 animate-pulse' },
     warning: { border: '#ffaa00', text: '#ffaa00', bg: 'rgba(255,170,0,0.08)', dot: 'bg-amber-400 animate-pulse' },
     info: { border: '#00d4ff', text: '#00d4ff', bg: 'rgba(0,212,255,0.06)', dot: 'bg-cyan-400' },
     nominal: { border: '#00ff88', text: '#00ff88', bg: 'rgba(0,255,136,0.05)', dot: 'bg-green-400' },
 };
 
-function LevelIcon({ level }: { level: IntelAlert['level'] }) {
-    if (level === 'critical') return <AlertTriangle size={11} className="text-red-500 shrink-0" />;
-    if (level === 'warning') return <AlertTriangle size={11} className="text-amber-400 shrink-0" />;
+function LevelIcon({ level }: { level: string }) {
+    if (level === 'critical' || level === 'warning') return <AlertTriangle size={11} className={level === 'critical' ? 'text-red-500 shrink-0' : 'text-amber-400 shrink-0'} />;
     if (level === 'info') return <Radio size={11} className="text-cyan-400 shrink-0" />;
     return <Globe size={11} className="text-green-400 shrink-0" />;
 }
@@ -25,113 +27,146 @@ function LevelIcon({ level }: { level: IntelAlert['level'] }) {
 export function IntelTicker() {
     const flights = useFlightStore((s) => s.flights);
     const selectFlight = useFlightStore((s) => s.selectFlight);
-    const [alerts, setAlerts] = useState<IntelAlert[]>([]);
+    const { alerts: aiAlerts, aiModeEnabled, toggleAIMode, lastGenerated, loading: aiLoading } = useAIStore();
+
+    const [ruleAlerts, setRuleAlerts] = useState<IntelAlert[]>([]);
     const [currentIdx, setCurrentIdx] = useState(0);
     const [paused, setPaused] = useState(false);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-    // Re-analyze whenever flights update
+    // Re-analyze rule-based alerts on flight updates
     useEffect(() => {
         if (flights.length === 0) return;
-        const newAlerts = analyzeFlights(flights);
-        setAlerts(newAlerts);
+        setRuleAlerts(analyzeFlights(flights));
         setCurrentIdx(0);
     }, [flights]);
 
-    const next = useCallback(() => {
-        setCurrentIdx((i) => (alerts.length > 0 ? (i + 1) % alerts.length : 0));
-    }, [alerts.length]);
+    // Combine rule-based + AI alerts
+    const allAlerts: CombinedAlert[] = [
+        ...ruleAlerts.map((a) => ({ ...a, source: 'rule' as const })),
+        ...(aiModeEnabled ? aiAlerts.map((a) => ({ ...a, message: a.message, category: a.category })) : []),
+    ].sort((a, b) => {
+        const order = { critical: 0, warning: 1, info: 2, nominal: 3 };
+        return order[a.level] - order[b.level];
+    });
 
-    const prev = useCallback(() => {
-        setCurrentIdx((i) => (alerts.length > 0 ? (i - 1 + alerts.length) % alerts.length : 0));
-    }, [alerts.length]);
+    const next = useCallback(() => setCurrentIdx((i) => allAlerts.length > 0 ? (i + 1) % allAlerts.length : 0), [allAlerts.length]);
+    const prev = useCallback(() => setCurrentIdx((i) => allAlerts.length > 0 ? (i - 1 + allAlerts.length) % allAlerts.length : 0), [allAlerts.length]);
 
-    // Auto-rotate
     useEffect(() => {
-        if (paused || alerts.length <= 1) return;
+        if (paused || allAlerts.length <= 1) return;
         timerRef.current = setInterval(next, ROTATE_INTERVAL);
         return () => { if (timerRef.current) clearInterval(timerRef.current); };
-    }, [paused, alerts.length, next]);
+    }, [paused, allAlerts.length, next]);
 
-    if (alerts.length === 0) return null;
+    // Keep index in bounds when alerts change
+    useEffect(() => {
+        if (currentIdx >= allAlerts.length && allAlerts.length > 0) setCurrentIdx(0);
+    }, [allAlerts.length, currentIdx]);
 
-    const alert = alerts[currentIdx];
-    const style = LEVEL_STYLES[alert.level];
+    if (allAlerts.length === 0) return null;
+
+    const alert = allAlerts[Math.min(currentIdx, allAlerts.length - 1)];
+    const style = LEVEL_STYLES[alert.level] || LEVEL_STYLES.info;
+    const isAI = 'source' in alert && alert.source === 'ai';
 
     const handleClick = () => {
-        if (!alert.flightIds?.length) return;
-        const flight = flights.find((f) => f.flight_id === alert.flightIds![0]);
-        if (flight) selectFlight(flight);
+        if (!isAI && 'flightIds' in alert && alert.flightIds?.length) {
+            const flight = flights.find((f) => f.flight_id === (alert as IntelAlert).flightIds![0]);
+            if (flight) selectFlight(flight);
+        }
     };
 
     return (
         <div
-            className="absolute z-10 font-mono"
+            className="absolute z-10 font-mono flex items-center gap-2"
             style={{ top: '12px', left: '120px', right: '12px' }}
             onMouseEnter={() => setPaused(true)}
             onMouseLeave={() => setPaused(false)}
         >
+            {/* Main ticker */}
             <div
-                className="flex items-center gap-2 px-3 py-1.5 rounded border text-[11px] cursor-pointer transition-all"
-                style={{
-                    background: style.bg,
-                    borderColor: style.border,
-                    boxShadow: `0 0 12px ${style.border}22`,
-                }}
+                className="flex items-center gap-2 px-3 py-1.5 rounded border text-[11px] cursor-pointer transition-all flex-1 min-w-0"
+                style={{ background: style.bg, borderColor: style.border, boxShadow: `0 0 12px ${style.border}22` }}
                 onClick={handleClick}
             >
-                {/* Dot */}
                 <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', style.dot)} />
 
-                {/* Category badge */}
-                <span
-                    className="shrink-0 text-[9px] tracking-widest font-bold px-1.5 py-0.5 rounded border"
-                    style={{ color: style.text, borderColor: style.border + '66' }}
-                >
+                {/* AI badge */}
+                {isAI && (
+                    <span className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded border border-purple-500/50 bg-purple-500/10 text-purple-400 text-[9px] font-bold">
+                        <Brain size={8} />AI
+                    </span>
+                )}
+
+                {/* Category */}
+                <span className="shrink-0 text-[9px] tracking-widest font-bold px-1.5 py-0.5 rounded border"
+                    style={{ color: style.text, borderColor: style.border + '66' }}>
                     {alert.category}
                 </span>
 
-                {/* Icon */}
                 <LevelIcon level={alert.level} />
 
                 {/* Message */}
-                <span className="flex-1 truncate" style={{ color: style.text }}>
-                    {alert.message}
-                </span>
+                <span className="flex-1 truncate" style={{ color: style.text }}>{alert.message}</span>
 
                 {/* Detail */}
-                {alert.detail && (
-                    <span className="text-hud-text-dim text-[10px] shrink-0 hidden md:block truncate max-w-[200px]">
+                {'detail' in alert && alert.detail && (
+                    <span className="text-hud-text-dim text-[10px] shrink-0 hidden md:block truncate max-w-[180px]">
                         {alert.detail}
                     </span>
                 )}
 
-                {/* Clickable indicator */}
-                {alert.flightIds?.length ? (
-                    <span className="text-[9px] text-hud-text-dim shrink-0 hidden lg:block">
-                        [CLICK TO TRACK]
+                {/* AI model tag */}
+                {isAI && (
+                    <span className="text-[9px] text-purple-400/60 shrink-0 hidden lg:block">
+                        [{(alert as AIAlert).model.split(':')[0]}]
                     </span>
+                )}
+
+                {/* Click to track */}
+                {!isAI && 'flightIds' in alert && (alert as IntelAlert).flightIds?.length ? (
+                    <span className="text-[9px] text-hud-text-dim shrink-0 hidden lg:block">[TRACK]</span>
                 ) : null}
 
                 {/* Counter + nav */}
                 <div className="flex items-center gap-1 shrink-0 ml-1">
-                    <button
-                        onClick={(e) => { e.stopPropagation(); prev(); }}
-                        className="text-hud-text-dim hover:text-hud-text transition-colors"
-                    >
+                    <button onClick={(e) => { e.stopPropagation(); prev(); }} className="text-hud-text-dim hover:text-hud-text">
                         <ChevronLeft size={12} />
                     </button>
-                    <span className="text-hud-text-dim text-[9px] w-8 text-center">
-                        {currentIdx + 1}/{alerts.length}
+                    <span className="text-hud-text-dim text-[9px] w-10 text-center">
+                        {currentIdx + 1}/{allAlerts.length}
                     </span>
-                    <button
-                        onClick={(e) => { e.stopPropagation(); next(); }}
-                        className="text-hud-text-dim hover:text-hud-text transition-colors"
-                    >
+                    <button onClick={(e) => { e.stopPropagation(); next(); }} className="text-hud-text-dim hover:text-hud-text">
                         <ChevronRight size={12} />
                     </button>
                 </div>
             </div>
+
+            {/* AI mode toggle — calls backend API, persists in Redis, no restart needed */}
+            <button
+                onClick={() => toggleAIMode()}
+                disabled={aiLoading}
+                title={aiModeEnabled ? 'AI ON — click to disable (saves resources)' : 'AI OFF — click to enable'}
+                className={cn(
+                    'shrink-0 flex items-center gap-1 px-2 py-1.5 rounded border font-mono text-[10px] transition-all',
+                    aiLoading ? 'opacity-50 cursor-wait' : '',
+                    aiModeEnabled
+                        ? 'border-purple-500 text-purple-400 bg-purple-500/10'
+                        : 'border-hud-border text-hud-text-dim hover:border-purple-500/50'
+                )}
+            >
+                <Brain size={11} />
+                {aiLoading
+                    ? <span className="text-[9px]">...</span>
+                    : <Zap size={9} className={aiModeEnabled ? 'text-purple-400' : 'text-hud-text-dim'} />
+                }
+                {lastGenerated && aiModeEnabled && (
+                    <span className="text-[9px] text-purple-400/60 hidden lg:block">
+                        {Math.round((Date.now() - lastGenerated) / 60000)}m ago
+                    </span>
+                )}
+            </button>
         </div>
     );
 }

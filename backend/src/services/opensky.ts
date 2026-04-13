@@ -24,8 +24,7 @@ class OpenSkyService {
     private accessToken: string | null = null;
     private tokenExpiresAt: number = 0;
     private lastFetch: number = 0;
-    // OpenSky rate limit: 1 request per 10s for authenticated users
-    private minInterval: number = 10000;
+    private minInterval: number = 5000;
 
     constructor() {
         this.client = axios.create({
@@ -67,10 +66,8 @@ class OpenSkyService {
 
     async getAllFlights(): Promise<Flight[]> {
         const now = Date.now();
-        // If we're within the minimum interval, skip this cycle gracefully
-        // (don't throw — let the poller use other sources)
         if (now - this.lastFetch < this.minInterval) {
-            throw new Error(`OpenSky: waiting ${Math.round((this.minInterval - (now - this.lastFetch)) / 1000)}s before next request`);
+            throw new Error('Rate limit: too many requests');
         }
 
         const token = await this.getToken();
@@ -92,16 +89,15 @@ class OpenSkyService {
                 .filter((f) => f.latitude !== null && f.longitude !== null);
 
             console.log(`[OpenSky] ${flights.length} flights (${token ? 'authenticated' : 'anonymous'})`);
-            // Reset to base interval on success
-            this.minInterval = 10000;
+            this.minInterval = 5000; // reset on success
             return flights;
         } catch (err: unknown) {
             if (axios.isAxiosError(err)) {
                 if (err.response?.status === 429) {
-                    // Back off exponentially but cap at 60s, reset after next success
                     this.minInterval = Math.min(this.minInterval * 2, 60000);
-                    console.warn('[OpenSky] Rate limited by server, backoff to', this.minInterval / 1000, 's');
+                    console.warn('[OpenSky] Rate limited, backoff to', this.minInterval / 1000, 's');
                 } else if (err.response?.status === 401) {
+                    // Token expired or invalid — clear it
                     this.accessToken = null;
                     this.tokenExpiresAt = 0;
                     console.warn('[OpenSky] Auth failed, clearing token');

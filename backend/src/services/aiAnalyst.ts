@@ -1,0 +1,272 @@
+/**
+ * AI Intelligence Analyst — powered by Ollama (local LLM)
+ *
+ * Every 60 seconds, sends a structured summary of current flight/satellite
+ * data to the local Ollama instance and asks it to generate OSINT intelligence
+ * assessments as breaking news alerts.
+ *
+ * Uses gemma4 by default (configurable via OLLAMA_MODEL env var).
+ * Accessible from Docker via host.docker.internal.
+ */
+import axios from 'axios';
+import { Flight, FlightStats } from '../types';
+
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://host.docker.internal:11434';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma4:latest';
+const ANALYSIS_INTERVAL_MS = parseInt(process.env.AI_NEWS_INTERVAL || '600000', 10);
+// AI_NEWS_ENABLED env var sets the DEFAULT — actual runtime state stored in Redis
+const AI_DEFAULT_ENABLED = process.env.AI_NEWS_ENABLED !== 'false';
+const AI_REDIS_KEY = 'geoint:ai:enabled';
+
+export interface AIAlert {
+    id: string;
+    level: 'critical' | 'warning' | 'info' | 'nominal';
+    category: string;
+    message: string;
+    detail?: string;
+    source: 'ai';
+    model: string;
+    generatedAt: number;
+}
+
+type AIAlertCallback = (alerts: AIAlert[]) => void;
+
+// Build a concise data summary for the LLM prompt
+function buildDataSummary(flights: Flight[], stats: FlightStats): string {
+    const military = flights.filter((f) => f.category === 'military' && !f.on_ground);
+    const cargo = flights.filter((f) => f.category === 'cargo' && !f.on_ground);
+
+    // Find geographic clusters of military aircraft
+    const regions = new Map<string, number>();
+    for (const f of military) {
+        if (!f.latitude || !f.longitude) continue;
+        const region = getRegion(f.latitude, f.longitude);
+        regions.set(region, (regions.get(region) || 0) + 1);
+    }
+
+    const topRegions = [...regions.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([r, n]) => `${r}: ${n}`)
+        .join(', ');
+
+    const emergencies = flights.filter((f) => f.squawk === '7700').length;
+    const hijacks = flights.filter((f) => f.squawk === '7500').length;
+    const highAlt = flights.filter((f) => f.altitude !== null && f.altitude > 12000 && f.category === 'military').length;
+
+    const milCallsigns = military.slice(0, 10)
+        .map((f) => f.callsign || f.flight_id.toUpperCase())
+        .join(', ');
+
+    return `LIVE GLOBAL AIRSPACE DATA (${new Date().toUTCString()}):
+- Total airborne: ${stats.airborne.toLocaleString()} aircraft
+- Commercial: ${stats.commercial} | Cargo: ${stats.cargo} | Military: ${stats.military} | Helicopter: ${stats.helicopter}
+- On ground: ${stats.on_ground}
+- Military aircraft airborne: ${military.length}
+- Military at high altitude (>12km): ${highAlt}
+- Emergency squawk 7700: ${emergencies}
+- Hijack squawk 7500: ${hijacks}
+- Military geographic distribution: ${topRegions || 'dispersed globally'}
+- Notable military callsigns: ${milCallsigns || 'none identified'}
+- Active cargo hubs: ${cargo.length} cargo aircraft airborne`;
+}
+
+function getRegion(lat: number, lon: number): string {
+    if (lat > 35 && lat < 42 && lon > 26 && lon < 45) return 'Eastern Mediterranean';
+    if (lat > 45 && lat < 70 && lon > 20 && lon < 60) return 'Eastern Europe/Russia';
+    if (lat > 20 && lat < 40 && lon > 40 && lon < 65) return 'Middle East/Gulf';
+    if (lat > 30 && lat < 45 && lon > 100 && lon < 130) return 'East Asia';
+    if (lat > 25 && lat < 50 && lon > -130 && lon < -60) return 'North America';
+    if (lat > 35 && lat < 60 && lon > -10 && lon < 30) return 'Europe';
+    if (lat > -35 && lat < 15 && lon > -80 && lon < -35) return 'South America';
+    if (lat > -40 && lat < 40 && lon > -20 && lon < 55) return 'Africa';
+    if (lat > 0 && lat < 35 && lon > 60 && lon < 100) return 'South Asia';
+    return 'Other';
+}
+
+const SYSTEM_PROMPT = `You are an OSINT (Open Source Intelligence) analyst monitoring global air traffic in real-time.
+You receive live ADS-B flight data and must generate concise intelligence assessments.
+
+Rules:
+- Generate 2-4 SHORT intelligence alerts based on the data
+- Each alert must be on its own line in this exact format:
+  LEVEL|CATEGORY|MESSAGE|DETAIL
+- LEVEL must be one of: CRITICAL, WARNING, INFO, NOMINAL
+- CATEGORY is a short label (max 20 chars, uppercase)
+- MESSAGE is the alert text (max 100 chars)
+- DETAIL is optional context (max 80 chars, or leave empty)
+- Focus on: unusual military concentrations, emergency squawks, geopolitical patterns, traffic anomalies
+- Be factual and concise — this is a real-time intelligence dashboard
+- Do NOT invent data not present in the summary
+- Do NOT use markdown, bullet points, or any formatting other than the pipe-separated format`;
+
+async function callOllama(dataSummary: string): Promise<string> {
+    const response = await axios.post(
+        `${OLLAMA_URL}/api/generate`,
+        {
+            model: OLLAMA_MODEL,
+            prompt: `${dataSummary}\n\nGenerate intelligence alerts:`,
+            system: SYSTEM_PROMPT,
+            stream: false,
+            options: {
+                temperature: 0.3,  // low temperature for factual output
+                num_predict: 400,  // limit response length
+                top_p: 0.9,
+            },
+        },
+        { timeout: 30_000 }
+    );
+    return response.data.response as string;
+}
+
+function parseAIResponse(raw: string, model: string): AIAlert[] {
+    const alerts: AIAlert[] = [];
+    const lines = raw.split('\n').map((l) => l.trim()).filter((l) => l.includes('|'));
+
+    for (const line of lines) {
+        const parts = line.split('|').map((p) => p.trim());
+        if (parts.length < 3) continue;
+
+        const [levelStr, category, message, detail] = parts;
+        const levelMap: Record<string, AIAlert['level']> = {
+            CRITICAL: 'critical', WARNING: 'warning', INFO: 'info', NOMINAL: 'nominal',
+        };
+        const level = levelMap[levelStr.toUpperCase()] || 'info';
+
+        if (!message || message.length < 5) continue;
+
+        alerts.push({
+            id: `ai_${Date.now()}_${alerts.length}`,
+            level,
+            category: category.substring(0, 25).toUpperCase(),
+            message: message.substring(0, 120),
+            detail: detail?.substring(0, 100) || undefined,
+            source: 'ai',
+            model,
+            generatedAt: Date.now(),
+        });
+    }
+
+    return alerts.slice(0, 5); // max 5 AI alerts
+}
+
+class AIAnalystService {
+    private interval: NodeJS.Timeout | null = null;
+    private callbacks: AIAlertCallback[] = [];
+    private lastAlerts: AIAlert[] = [];
+    private isRunning = false;
+    private consecutiveErrors = 0;
+    private getFlightsFn: (() => Promise<Flight[]>) | null = null;
+
+    onAlerts(cb: AIAlertCallback): void { this.callbacks.push(cb); }
+    getLastAlerts(): AIAlert[] { return this.lastAlerts; }
+
+    // Read enabled state from Redis (falls back to env default)
+    async isEnabled(): Promise<boolean> {
+        try {
+            const { getRedis } = await import('./redis');
+            const val = await getRedis().get(AI_REDIS_KEY);
+            if (val === null) return AI_DEFAULT_ENABLED; // not set yet → use env default
+            return val === 'true';
+        } catch {
+            return AI_DEFAULT_ENABLED;
+        }
+    }
+
+    // Set enabled state in Redis — persists across restarts, no rebuild needed
+    async setEnabled(enabled: boolean): Promise<void> {
+        try {
+            const { getRedis } = await import('./redis');
+            await getRedis().set(AI_REDIS_KEY, enabled ? 'true' : 'false');
+            console.log(`[AI Analyst] ${enabled ? 'Enabled' : 'Disabled'} via API`);
+
+            if (enabled && !this.isRunning && this.getFlightsFn) {
+                this.startLoop(this.getFlightsFn);
+            } else if (!enabled && this.isRunning) {
+                this.stopLoop();
+            }
+        } catch (err) {
+            console.error('[AI Analyst] Failed to set enabled state:', (err as Error).message);
+        }
+    }
+
+    start(getFlights: () => Promise<Flight[]>, _getStats: () => FlightStats | null): void {
+        this.getFlightsFn = getFlights;
+
+        // Initialize Redis key from env default if not already set
+        this.isEnabled().then((enabled) => {
+            console.log(`[AI Analyst] Initial state: ${enabled ? 'ENABLED' : 'DISABLED'} (env default: ${AI_DEFAULT_ENABLED})`);
+            if (enabled) {
+                this.startLoop(getFlights);
+            } else {
+                console.log(`[AI Analyst] Disabled — toggle via POST /ai/toggle or set AI_NEWS_ENABLED=true`);
+            }
+        });
+    }
+
+    private startLoop(getFlights: () => Promise<Flight[]>): void {
+        if (this.isRunning) return;
+        this.isRunning = true;
+        console.log(`[AI Analyst] Starting loop — model: ${OLLAMA_MODEL} @ ${OLLAMA_URL}, interval: ${ANALYSIS_INTERVAL_MS / 1000}s`);
+
+        const run = async () => {
+            // Re-check enabled state each run (can be toggled mid-interval)
+            const enabled = await this.isEnabled();
+            if (!enabled) {
+                this.stopLoop();
+                return;
+            }
+
+            try {
+                const flights = await getFlights();
+                if (flights.length === 0) return;
+
+                const airborne = flights.filter(f => !f.on_ground);
+                const stats: FlightStats = {
+                    total: flights.length,
+                    commercial: airborne.filter(f => f.category === 'commercial').length,
+                    cargo: airborne.filter(f => f.category === 'cargo').length,
+                    military: airborne.filter(f => f.category === 'military').length,
+                    private: airborne.filter(f => f.category === 'private').length,
+                    helicopter: airborne.filter(f => f.category === 'helicopter').length,
+                    unknown: airborne.filter(f => f.category === 'unknown').length,
+                    on_ground: flights.filter(f => f.on_ground).length,
+                    airborne: airborne.length,
+                };
+
+                const summary = buildDataSummary(flights, stats);
+                console.log('[AI Analyst] Sending data to Ollama...');
+
+                const raw = await callOllama(summary);
+                const alerts = parseAIResponse(raw, OLLAMA_MODEL);
+
+                if (alerts.length > 0) {
+                    this.lastAlerts = alerts;
+                    this.consecutiveErrors = 0;
+                    console.log(`[AI Analyst] Generated ${alerts.length} alerts`);
+                    this.callbacks.forEach((cb) => cb(alerts));
+                }
+            } catch (err) {
+                this.consecutiveErrors++;
+                if (this.consecutiveErrors <= 3) {
+                    console.warn('[AI Analyst] Error:', (err as Error).message);
+                }
+            }
+        };
+
+        setTimeout(run, 10_000);
+        this.interval = setInterval(run, ANALYSIS_INTERVAL_MS);
+    }
+
+    private stopLoop(): void {
+        if (this.interval) { clearInterval(this.interval); this.interval = null; }
+        this.isRunning = false;
+        console.log('[AI Analyst] Loop stopped');
+    }
+
+    stop(): void {
+        this.stopLoop();
+    }
+}
+
+export const aiAnalyst = new AIAnalystService();

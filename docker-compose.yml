@@ -56,6 +56,11 @@ services:
       FLIGHT_POLL_INTERVAL: ${FLIGHT_POLL_INTERVAL:-10000}
       WINDY_API_KEY: ${WINDY_API_KEY:-}
       WEBCAMS_TRAVEL_KEY: ${WEBCAMS_TRAVEL_KEY:-}
+      # Ollama — runs on host machine, accessible via host.docker.internal
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:latest}
+      AI_NEWS_ENABLED: ${AI_NEWS_ENABLED:-false}
+      AI_NEWS_INTERVAL: ${AI_NEWS_INTERVAL:-600000}
     volumes:
       - ./backend:/app
       - backend_modules:/app/node_modules
@@ -66,6 +71,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - geoint_net
     restart: unless-stopped

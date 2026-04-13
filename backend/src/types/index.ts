@@ -80,7 +80,7 @@ export interface OpenSkyState {
 }
 
 export interface WebSocketMessage {
-    type: 'flights_update' | 'flight_delta' | 'camera_update' | 'stats' | 'error';
+    type: 'flights_update' | 'flight_delta' | 'camera_update' | 'stats' | 'error' | 'ai_alerts';
     payload: unknown;
     timestamp: number;
 }

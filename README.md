@@ -90,7 +90,18 @@ Open **http://localhost:8066** — the full platform is running.
 - Click any camera marker → live feed viewer with Windy embed player
 - Camera list with city-based navigation
 
-### 🧠 Live Intelligence Ticker
+### 🧠 AI-Powered Intelligence (Ollama)
+- Local LLM integration via **Ollama** — runs on your own hardware, no cloud API needed
+- Every 60 seconds, sends live flight data summary to the LLM for OSINT analysis
+- Generates 2-5 intelligence alerts in structured format (level, category, message, detail)
+- AI alerts appear in the Intel Ticker with a purple **🧠 AI** badge and model name
+- **Toggle button** in the ticker to enable/disable AI mode (saves resources when needed)
+- Shows "Xm ago" since last AI generation
+- Supports any Ollama model: `llama3.2`, `mistral`, `phi4`, `qwen2.5`, `gemma4`, etc.
+- `GET /api/ai/status` — check AI analyst status and last alerts
+- Configured via `OLLAMA_URL`, `OLLAMA_MODEL`, `AI_NEWS_ENABLED` env vars
+
+
 - **Real-time OSINT deductions** from flight data, displayed as a scrolling news ticker
 - Detections running on every data update:
   - Military formations (8+ aircraft within 200km) → WARNING/CRITICAL
@@ -256,7 +267,7 @@ geoint/
 └── .env.example                    # All configuration options documented
 ```
 
-**Total: ~6,076 lines of TypeScript across 49 files**
+**Total: ~6,782 lines of TypeScript across 52 files**
 
 ---
 

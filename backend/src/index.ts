@@ -8,7 +8,9 @@ import { cameraRoutes } from './routes/cameras';
 import { websocketRoutes } from './websocket/flightStream';
 import { searchRoutes } from './routes/search';
 import { satelliteRoutes } from './routes/satellites';
+import { aiRoutes } from './routes/ai';
 import { flightPoller } from './services/flightPoller';
+import { aiAnalyst } from './services/aiAnalyst';
 import { getRedis } from './services/redis';
 import { getPool } from './services/database';
 
@@ -47,6 +49,7 @@ async function bootstrap(): Promise<void> {
     await fastify.register(cameraRoutes);
     await fastify.register(searchRoutes);
     await fastify.register(satelliteRoutes);
+    await fastify.register(aiRoutes);
     await fastify.register(websocketRoutes);
 
     // Start server
@@ -72,6 +75,13 @@ async function bootstrap(): Promise<void> {
     // Start flight polling
     flightPoller.start();
     console.log('[Server] Flight poller started');
+
+    // Start AI analyst (requires Ollama running at OLLAMA_URL)
+    aiAnalyst.start(
+        () => flightPoller.getCurrentFlights(),
+        () => null  // stats computed inside aiAnalyst from flights
+    );
+    console.log('[Server] AI analyst started');
 
     // Clear stale camera cache so fresh data is fetched on first request
     try {

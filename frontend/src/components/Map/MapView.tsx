@@ -77,7 +77,8 @@ export default function MapView() {
     const cameraMarkersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
     const canvasFilterRef = useRef<string>('');
 
-    const [isGlobe, setIsGlobe] = useState(true);
+    const [isGlobe, setIsGlobe] = useState(false); // false until style.load confirms globe is active
+    const [styleLoaded, setStyleLoaded] = useState(false);
     const [coords, setCoords] = useState({ lat: 25, lng: 10, zoom: 2 });
     const [hoveredFlight, setHoveredFlight] = useState<Flight | null>(null);
     const [popupPos, setPopupPos] = useState<{ x: number; y: number } | null>(null);
@@ -131,6 +132,7 @@ export default function MapView() {
 
         map.on('style.load', () => {
             styleReadyRef.current = true;
+            setStyleLoaded(true);
 
             // Apply canvas filter for the initial style (e.g. night mode)
             const canvas = map.getCanvas();
@@ -189,6 +191,7 @@ export default function MapView() {
 
         setCurrentStyleId(styleDef.id);
         styleReadyRef.current = false;
+        setStyleLoaded(false); // reset badge to loading while new style loads
 
         // Apply canvas CSS filter for visual modes
         canvasFilterRef.current = styleDef.canvasFilter || '';
@@ -200,6 +203,7 @@ export default function MapView() {
 
         map.once('style.load', () => {
             styleReadyRef.current = true;
+            setStyleLoaded(true);
 
             // Try globe (vector styles only)
             try {
@@ -391,10 +395,14 @@ export default function MapView() {
             {/* Satellite layer — renders markers via MapLibre */}
             <SatelliteLayer mapRef={mapRef} styleReady={styleReadyRef} />
 
-            {/* Globe/2D badge */}
+            {/* Globe/2D badge — only shown after style confirms projection */}
             <div className="absolute top-3 left-3 z-10 font-mono text-[10px] px-2 py-1 rounded border pointer-events-none"
-                style={{ background: 'rgba(5,10,15,0.85)', borderColor: isGlobe ? '#00d4ff' : '#0d2137', color: isGlobe ? '#00d4ff' : '#4a7a99' }}>
-                {isGlobe ? '🌍 3D GLOBE' : '🗺 2D MAP'}
+                style={{
+                    background: 'rgba(5,10,15,0.85)',
+                    borderColor: !styleLoaded ? '#0d2137' : isGlobe ? '#00d4ff' : '#0d2137',
+                    color: !styleLoaded ? '#4a7a99' : isGlobe ? '#00d4ff' : '#4a7a99',
+                }}>
+                {!styleLoaded ? '⏳ LOADING' : isGlobe ? '🌍 3D GLOBE' : '🗺 2D MAP'}
             </div>
 
             {/* Intel ticker — live OSINT deductions from flight data */}
