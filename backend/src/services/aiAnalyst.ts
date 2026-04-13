@@ -134,11 +134,6 @@ async function callOllama(dataSummary: string): Promise<string> {
     );
     return response.data.response as string;
 }
-        },
-{ timeout: 60_000 }  // large models can take time on first load
-    );
-return response.data.response as string;
-}
 
 function parseAIResponse(raw: string, model: string): AIAlert[] {
     const alerts: AIAlert[] = [];
