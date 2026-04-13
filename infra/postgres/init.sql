@@ -96,3 +96,16 @@ CREATE TABLE IF NOT EXISTS satellites (
 CREATE INDEX IF NOT EXISTS idx_satellites_norad_id ON satellites(norad_id);
 CREATE INDEX IF NOT EXISTS idx_satellites_group_id ON satellites(group_id);
 CREATE INDEX IF NOT EXISTS idx_satellites_epoch ON satellites(epoch);
+
+-- AI news history — stores every AI generation with prompt and response
+CREATE TABLE IF NOT EXISTS ai_news_history (
+  id SERIAL PRIMARY KEY,
+  prompt TEXT NOT NULL,
+  response TEXT NOT NULL,
+  model VARCHAR(64) NOT NULL,
+  alerts JSONB NOT NULL DEFAULT '[]',
+  alert_count INTEGER NOT NULL DEFAULT 0,
+  generated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_news_generated_at ON ai_news_history(generated_at);

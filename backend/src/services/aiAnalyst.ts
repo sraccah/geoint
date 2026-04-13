@@ -10,6 +10,7 @@
  */
 import axios from 'axios';
 import { Flight, FlightStats } from '../types';
+import { getPool } from './database';
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://host.docker.internal:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'mistral:latest';
@@ -272,6 +273,11 @@ class AIAnalystService {
                 this.consecutiveErrors = 0;
                 console.log(`[AI Analyst] ${label} — generated ${alerts.length} alerts, model unloaded`);
                 this.callbacks.forEach((cb) => cb(alerts));
+
+                // Persist to DB for history (non-blocking)
+                saveAINewsToDB(summary, raw, OLLAMA_MODEL, alerts).catch((err) =>
+                    console.warn('[AI Analyst] DB save error:', (err as Error).message)
+                );
             }
         } catch (err) {
             this.consecutiveErrors++;
@@ -337,6 +343,36 @@ class AIAnalystService {
         this.stopLoop();
         this.stopBackground();
     }
+}
+
+// ── DB persistence for AI news history ────────────────────────────────────────
+
+async function saveAINewsToDB(prompt: string, response: string, model: string, alerts: AIAlert[]): Promise<void> {
+    const db = getPool();
+    await db.query(
+        `INSERT INTO ai_news_history (prompt, response, model, alerts, alert_count, generated_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())`,
+        [prompt, response, model, JSON.stringify(alerts), alerts.length]
+    );
+}
+
+export async function getAINewsHistory(hours = 24): Promise<Array<{
+    id: number;
+    model: string;
+    alerts: AIAlert[];
+    alert_count: number;
+    generated_at: string;
+}>> {
+    const db = getPool();
+    const result = await db.query(
+        `SELECT id, model, alerts, alert_count, generated_at
+         FROM ai_news_history
+         WHERE generated_at > NOW() - ($1 || ' hours')::INTERVAL
+         ORDER BY generated_at DESC
+         LIMIT 100`,
+        [hours]
+    );
+    return result.rows;
 }
 
 export const aiAnalyst = new AIAnalystService();

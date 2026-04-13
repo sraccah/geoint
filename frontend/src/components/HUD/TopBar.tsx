@@ -3,6 +3,7 @@
 import { useFlightStore } from '@/store/flightStore';
 import { useUIStore } from '@/store/uiStore';
 import { useSatelliteStore } from '@/store/satelliteStore';
+import { useCameraStore } from '@/store/cameraStore';
 import { cn } from '@/lib/utils';
 import { PanelLeft, PanelRight, Globe, Activity } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -13,6 +14,7 @@ export function TopBar() {
     const { toggleLeftPanel, toggleRightPanel, leftPanelOpen } = useUIStore();
     const { visibleGroups, satellites, groups } = useSatelliteStore();
     const [time, setTime] = useState('');
+    const { cameras } = useCameraStore();
 
     useEffect(() => {
         const update = () => setTime(new Date().toISOString().replace('T', ' ').substring(0, 19) + 'Z');
@@ -44,6 +46,8 @@ export function TopBar() {
 
                 {/* Flight stats */}
                 <div className="hidden 2xl:flex items-center gap-3 font-mono text-xs shrink-0">
+                    {/* CCTV count before the divider */}
+                    <StatBadge label="CCTV" value={cameras.length || '—'} color="#00ff88" />
                     {/* Divider */}
                     <div className="w-px h-5 bg-hud-border" />
                     <StatBadge label="AIRBORNE" value={stats?.airborne ?? '—'} color="#00d4ff" />

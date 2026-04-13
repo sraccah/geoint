@@ -8,6 +8,7 @@ import { TopBar } from '@/components/HUD/TopBar';
 import { StatusBar } from '@/components/HUD/StatusBar';
 import { FlightDetailsPanel } from '@/components/Details/FlightDetailsPanel';
 import { SatelliteDetails } from '@/components/Details/SatelliteDetails';
+import { AINewsPanel } from '@/components/Details/AINewsPanel';
 import { CameraViewer } from '@/components/Details/CameraViewer';
 import { useUIStore } from '@/store/uiStore';
 import { useFlightStore } from '@/store/flightStore';
@@ -29,10 +30,20 @@ export default function HomePage() {
     const { selectedSatellite } = useSatelliteStore();
     const { fetchStatus } = useAIStore();
 
-    // Fetch real AI enabled state from backend (Redis) on mount
     useEffect(() => { fetchStatus(); }, [fetchStatus]);
 
-    const showRightPanel = selectedFlight || selectedSatellite || rightPanelOpen;
+    // Right panel content:
+    // 1. Satellite selected → satellite details
+    // 2. Flight selected → flight details
+    // 3. Nothing selected → AI news feed (last 24h)
+    const rightPanelContent = selectedSatellite
+        ? <SatelliteDetails />
+        : selectedFlight
+            ? <FlightDetailsPanel />
+            : <AINewsPanel />;
+
+    // Always show right panel (AI news when nothing selected)
+    const showRightPanel = true;
 
     return (
         <div className="flex flex-col h-screen bg-hud-bg overflow-hidden">
@@ -47,8 +58,8 @@ export default function HomePage() {
                     <MapView />
                 </div>
                 {showRightPanel && (
-                    <div className="w-72 z-10 animate-fade-in">
-                        {selectedSatellite ? <SatelliteDetails /> : <FlightDetailsPanel />}
+                    <div className="w-72 z-10 animate-fade-in h-full">
+                        {rightPanelContent}
                     </div>
                 )}
             </div>
